@@ -4,21 +4,26 @@ from sklearn.metrics import pairwise_distances
 
 import zadu
 
+MACHINE_EPSILON = np.finfo(np.double).eps
 
 class Metrics():
     """
     Class for computing various stress metrics between high-dimensional and low-dimensional data.
     """
-    def __init__(self, X, Y):
+    def __init__(self, X, Y, scaling_factors = np.linspace(MACHINE_EPSILON, 20, 100)):
         """
         Initialize the Metrics class with high-dimensional data X and low-dimensional data Y.
         Compute pairwise distances within X and Y.
+        Also compute pairwise distances within Y for different scales in scaling_factors
         """
         self.X = X 
         self.Y = Y 
 
         self.dX = pairwise_distances(X)
         self.dY = pairwise_distances(Y)
+
+        self.Y_batch = self.Y[None , :, :] * scaling_factors[ :, None, None]
+        self.dY_batch = np.array([pairwise_distances(Y) for Y in self.Y_batch])
 
     def setY(self,Y):
         """
@@ -87,13 +92,14 @@ class Metrics():
     def compute_kl_divergence(self, perplexity=30):
         """
         Compute joint probability distributions of X and Y à la t-SNE and compute the KL divergence between them
+
         Parameters
         ----------
         perplexity : Perplexity as described in Hinton and Roweis (2002) https://www.cs.toronto.edu/~hinton/absps/sne.pdf
         """
         # High-dimensional probability space
         n_samples, _ = self.X.shape
-        conditional_P = self.__conditional_probabilities(perplexity)
+        conditional_P = self._conditional_probabilities(perplexity)
         P = (conditional_P + conditional_P.T) / (2 * n_samples)    
 
         # Low-dimensional probability space
@@ -113,10 +119,49 @@ class Metrics():
 
         return kl_divergence
     
-    def __conditional_probabilities(self, perplexity, steps=40):
+    def compute_kl_divergences(self, perplexity):
+        """
+        Compute joint probability distributions of X and Y à la t-SNE and compute the KL divergence between them
+
+        Parameters
+        ----------
+        perplexity : float
+            Perplexity as described in Hinton and Roweis (2002) https://www.cs.toronto.edu/~hinton/absps/sne.pdf
+        scaling_factors : np.ndarray
+            factors by which to scale the low-dimensional space
+        """
+
+        # High-dimensional probability space
+        n_samples = self.X.shape[0]
+        conditional_P = self._conditional_probabilities(perplexity)
+        P = (conditional_P + conditional_P.T) / (2 * n_samples)
+
+
+        # Compute low-dimensional probability space for all Y_batch
+        Q_batch = np.where(
+            self.dY_batch != 0,
+            (np.square(self.dY_batch) + 1) ** -1,
+            0,
+        )
+        Q_batch = Q_batch / Q_batch.sum(axis=(1, 2), keepdims=True)
+
+        # Clip at machine epsilon to fix precision errors
+        P = np.clip(P, MACHINE_EPSILON, 1)
+        Q_batch = np.clip(Q_batch, MACHINE_EPSILON, 1)
+
+        # KL Divergence for all Y_batch
+        log_P = np.log2(P)
+        log_Q_batch = np.log2(Q_batch)
+
+        kl_divergences = (P * (log_P - log_Q_batch)).sum(axis=(1, 2))
+        return kl_divergences
+
+
+    def _conditional_probabilities(self, perplexity, steps=40):
         """
         Calculate conditional probability matrix P corresponding to SNE algorithm
-        P[i, j] = P(j|i)
+        
+        P[i, j] = P (j | i)
         
         Parameters
         ----------
@@ -129,18 +174,15 @@ class Metrics():
         beta_min = np.full((n_samples, 1), -np.inf) # Why not this instead since beta > 0 (makes binary search update easier)?: beta_min = np.zeros((n_samples, 1), dtype=float)
         beta_max = np.full((n_samples, 1), np.inf)
 
-        epsilon = np.finfo(np.double).eps
-
         # Binary Search
         for _ in range(steps):
             # Create conditional probability distributions
             P = np.where(self.dX != 0, np.exp(-1 * np.square(self.dX) / beta), 0)
-            row_sums = np.maximum(P.sum(axis=1, keepdims=True), epsilon)
+            row_sums = np.maximum(P.sum(axis=1, keepdims=True), MACHINE_EPSILON)
             P = P / row_sums
 
             # Calculate entropy
             entropy = -1 * (P * np.log2(P, where=(P > 0))).sum(axis=1, keepdims=True)
-            # entropy = np.log2(row_sums) + ((np.square(self.dX)) * P).sum(axis=1, keepdims=True)
             entropy_diff = entropy - desired_entropy
     
 
@@ -200,6 +242,3 @@ if __name__ == "__main__":
     plt.plot(rrange, norm_stress_scores)
     plt.scatter(alpha_opt, scale_opt)
     plt.show()
-
-    
-
