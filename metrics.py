@@ -83,6 +83,98 @@ class Metrics():
         from zadu.measures import spearman_rho
         shepardCorr = spearman_rho.measure(self.X,self.Y,(self.dX,self.dY))
         return shepardCorr['spearman_rho']
+    
+    def compute_kl_divergence(self, perplexity=30):
+        """
+        Compute joint probability distributions of X and Y à la t-SNE and compute the KL divergence between them
+        Parameters
+        ----------
+        perplexity : Perplexity as described in Hinton and Roweis (2002) https://www.cs.toronto.edu/~hinton/absps/sne.pdf
+        """
+        # High-dimensional probability space
+        n_samples, _ = self.X.shape
+        conditional_P = self.__conditional_probabilities(perplexity)
+        P = (conditional_P + conditional_P.T) / (2 * n_samples)    
+
+        # Low-dimensional probability space
+        Q = np.where(self.dY != 0, (np.square(self.dY) + 1) ** -1, 0)
+        Q = Q / Q.sum()
+
+        # Clip at machine epsilon to fix precision errors
+        epsilon = np.finfo(np.double).eps
+        P = np.clip(P, epsilon, 1)
+        Q = np.clip(Q, epsilon, 1)
+
+        # KL Divergence
+        log_P = np.where(P > 0, np.log2(P), 0)
+        log_Q = np.where(Q > 0, np.log2(Q), 0)
+        kl_divergence = (P * (log_P - log_Q)).sum()
+
+
+        return kl_divergence
+    
+    def __conditional_probabilities(self, perplexity, steps=40):
+        """
+        Calculate conditional probability matrix P corresponding to SNE algorithm
+        P[i, j] = P(j|i)
+        
+        Parameters
+        ----------
+        perplexity : Perplexity as described in Hinton and Roweis (2002) https://www.cs.toronto.edu/~hinton/absps/sne.pdf
+        steps : Number of steps for binary search for variances of Gaussian distributions
+        """
+        n_samples, _ = self.X.shape
+        desired_entropy = np.full((n_samples, 1), np.log2(perplexity), dtype=float)
+        beta = np.ones((n_samples, 1), dtype=float) # (2 * var_i ** 2) in the exponent of the Gaussian distribution
+        beta_min = np.full((n_samples, 1), -np.inf) # Why not this instead since beta > 0 (makes binary search update easier)?: beta_min = np.zeros((n_samples, 1), dtype=float)
+        beta_max = np.full((n_samples, 1), np.inf)
+
+        epsilon = np.finfo(np.double).eps
+
+        # Binary Search
+        for _ in range(steps):
+            # Create conditional probability distributions
+            P = np.where(self.dX != 0, np.exp(-1 * np.square(self.dX) / beta), 0)
+            row_sums = np.maximum(P.sum(axis=1, keepdims=True), epsilon)
+            P = P / row_sums
+
+            # Calculate entropy
+            entropy = -1 * (P * np.log2(P, where=(P > 0))).sum(axis=1, keepdims=True)
+            # entropy = np.log2(row_sums) + ((np.square(self.dX)) * P).sum(axis=1, keepdims=True)
+            entropy_diff = entropy - desired_entropy
+    
+
+            # Stop if variances sufficiently match perplexity
+            if np.all(np.abs(entropy_diff) < 1e-5):
+                break
+            
+
+            # Binary search update:
+
+            should_increase_beta = entropy_diff < 0.0
+
+            # Update beta_min and beta_max
+            beta_min = np.where(should_increase_beta, beta, beta_min)
+            beta_max = np.where(should_increase_beta, beta_max, beta)
+
+            beta_max_is_inf = (beta_max == np.inf)
+            beta_min_is_inf = (beta_min == -np.inf)
+        
+            # Update beta
+
+            mask = should_increase_beta & beta_max_is_inf
+            beta[mask] = beta[mask] * 2
+
+            mask = should_increase_beta & ~beta_max_is_inf
+            beta[mask] = (beta[mask] + beta_max[mask]) / 2.0
+
+            mask = ~should_increase_beta & ~beta_min_is_inf
+            beta[mask] = (beta[mask] + beta_min[mask]) / 2.0
+
+            mask = ~should_increase_beta & beta_min_is_inf
+            beta[mask] = beta[mask] / 2.0
+
+        return P
 
 
 if __name__ == "__main__":
