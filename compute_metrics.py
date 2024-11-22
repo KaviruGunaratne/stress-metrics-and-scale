@@ -14,10 +14,12 @@ def compute_all_metrics():
     The results are saved in a JSON file.
     """
     results = dict()
+    datasets = os.listdir('datasets')
 
-    with tqdm.tqdm(total=len(os.listdir('datasets')) * 10 * 4) as pbar:
 
-        for datasetStr in os.listdir("datasets"):
+    with tqdm.tqdm(total=len(datasets) * 10 * 4) as pbar:
+
+        for datasetStr in datasets:
             datasetName = datasetStr.replace(".npy", "")
             if "fashion_mnist" in datasetStr:
                 datasetName = "fashion_mnist"
@@ -91,13 +93,19 @@ def test_curve():
 
 def graph_kl(scales):
     import matplotlib.pyplot as plt
+    from matplotlib.gridspec import GridSpec
 
     if not os.path.isdir("test-kl-figures"):
         os.mkdir('test-kl-figures')
 
-    with tqdm.tqdm(total=len(os.listdir('datasets')) * 4) as pbar:
+    datasets = os.listdir('datasets')
+    # datasets = ['orl.npy', 'har.npy', 'coil20.npy', 'cnae9.npy']
+    
 
-        for datasetStr in os.listdir("datasets"):
+
+    with tqdm.tqdm(total=len(datasets) * 4) as pbar:
+
+        for datasetStr in datasets:
             datasetName = datasetStr.replace(".npy", "")
             if "fashion_mnist" in datasetStr:
                 datasetName = "fashion_mnist"
@@ -105,25 +113,33 @@ def graph_kl(scales):
 
             print(f"Dataset: {datasetName}, size: {X.shape}")
 
-            fig, ax = plt.subplots()
-            for alg in ["RANDOM", "MDS", "UMAP", "TSNE"]:
+            fig = plt.figure(figsize=(20, 10))
+            gs = GridSpec(2, 4, figure=fig)
+            graph_ax = fig.add_subplot(gs[0, :])
+            
+            for i, alg in enumerate(["RANDOM", "MDS", "UMAP", "TSNE"]):
 
                 Y = np.load(f"embeddings/{datasetName}_{alg}_0.npy")
 
                 M = Metrics(X, Y, scaling_factors=scales)
-
                 kl_divergences = M.compute_kl_divergences(perplexity=30)
 
-                ax.plot(scales, kl_divergences, label=alg)
-
-                # datasetResults[f'{alg}_norm'] = M.compute_normalized_stress()
+                graph_ax.plot(scales, kl_divergences, label=alg)
+                
+                alg_ax = fig.add_subplot(gs[1, i])
+                alg_ax.scatter(Y[:, 0], Y[:, 1], color='black', s=2)
+                alg_ax.set_title(f"{alg} Embedding")
 
                 pbar.update(1)
 
-            plt.xlabel('Scaling Factor')
-            plt.ylabel('KL Divergence')
-            plt.title(f'Variation of KL Divergence with scale for {datasetName} Dataset')
-            ax.legend()
+            graph_ax.set_title("KL Divergence w.r.t. Scale")
+            graph_ax.set_xlabel("Scaling Factor")
+            graph_ax.set_ylabel("KL Divergence")
+            graph_ax.legend()
+
+            fig.suptitle(f'Variation of KL Divergence with scale for {datasetName} Dataset', fontweight='bold')
+            # plt.tight_layout()
+
             fig.savefig(f"test-kl-figures/{datasetName}.png")
             plt.close(fig)
 
