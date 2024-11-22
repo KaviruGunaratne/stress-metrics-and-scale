@@ -6,5 +6,6 @@ results/
 __pycache__/
 datasets/
 embeddings/
+test-kl-figures/
 out.json
 test.ipynb
