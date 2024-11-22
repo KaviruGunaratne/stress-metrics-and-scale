@@ -5,6 +5,7 @@ import os
 import tqdm
 
 from metrics import Metrics
+from metrics import MACHINE_EPSILON
 
 
 def compute_all_metrics():
@@ -35,14 +36,10 @@ def compute_all_metrics():
 
                     # Compute and store each metric
                     datasetResults[f'{alg}_raw'] = M.compute_raw_stress()
-                    datasetResults[f'{
-                        alg}_norm'] = M.compute_normalized_stress()
-                    datasetResults[f'{
-                        alg}_scalenorm'] = M.compute_scale_normalized_stress()
-                    datasetResults[f'{
-                        alg}_kruskal'] = M.compute_kruskal_stress()
-                    datasetResults[f'{
-                        alg}_sheppard'] = M.compute_shepard_correlation()
+                    datasetResults[f'{alg}_norm'] = M.compute_normalized_stress()
+                    datasetResults[f'{alg}_scalenorm'] = M.compute_scale_normalized_stress()
+                    datasetResults[f'{alg}_kruskal'] = M.compute_kruskal_stress()
+                    datasetResults[f'{alg}_sheppard'] = M.compute_shepard_correlation()
 
                     pbar.update(1)
 
@@ -92,6 +89,53 @@ def test_curve():
             #     json.dump(results,fdata,indent=4)
 
 
+def graph_kl(scales):
+    import matplotlib.pyplot as plt
+
+    if not os.path.isdir("test-kl-figures"):
+        os.mkdir('test-kl-figures')
+
+    with tqdm.tqdm(total=len(os.listdir('datasets')) * 4) as pbar:
+
+        for datasetStr in os.listdir("datasets"):
+            datasetName = datasetStr.replace(".npy", "")
+            if "fashion_mnist" in datasetStr:
+                datasetName = "fashion_mnist"
+            X = np.load(f"datasets/{datasetName}.npy")
+
+            print(f"Dataset: {datasetName}, size: {X.shape}")
+
+            fig, ax = plt.subplots()
+            for alg in ["RANDOM", "MDS", "UMAP", "TSNE"]:
+
+                Y = np.load(f"embeddings/{datasetName}_{alg}_0.npy")
+
+                M = Metrics(X, Y, scaling_factors=scales)
+
+                kl_divergences = M.compute_kl_divergences(perplexity=30)
+
+                ax.plot(scales, kl_divergences, label=alg)
+
+                # datasetResults[f'{alg}_norm'] = M.compute_normalized_stress()
+
+                pbar.update(1)
+
+            plt.xlabel('Scaling Factor')
+            plt.ylabel('KL Divergence')
+            plt.title(f'Variation of KL Divergence with scale for {datasetName} Dataset')
+            ax.legend()
+            fig.savefig(f"test-kl-figures/{datasetName}.png")
+            plt.close(fig)
+
+
+    # Add labels, title, and legend
+    plt.legend()
+
+    # Show grid
+    plt.grid(True)
+
+
 if __name__ == "__main__":
     compute_all_metrics()
     # test_curve()
+    graph_kl(scales=np.linspace(MACHINE_EPSILON, 20, 100))
