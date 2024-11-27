@@ -4,7 +4,7 @@ from sklearn.metrics import pairwise_distances
 
 import zadu
 
-MACHINE_EPSILON = np.finfo(np.double).eps
+MACHINE_EPSILON = np.finfo(np.float64).eps
 
 class Metrics():
     """
@@ -169,9 +169,9 @@ class Metrics():
         steps : Number of steps for binary search for variances of Gaussian distributions
         """
         n_samples, _ = self.X.shape
-        desired_entropy = np.full((n_samples, 1), np.log2(perplexity), dtype=float)
-        beta = np.ones((n_samples, 1), dtype=float) # (2 * var_i ** 2) in the exponent of the Gaussian distribution
-        beta_min = np.full((n_samples, 1), -np.inf) # Why not this instead since beta > 0 (makes binary search update easier)?: beta_min = np.zeros((n_samples, 1), dtype=float)
+        desired_entropy = np.full((n_samples, 1), np.log2(perplexity))
+        beta = np.ones((n_samples, 1)) # (2 * var_i ** 2) in the exponent of the Gaussian distribution
+        beta_min = beta_min = np.zeros((n_samples, 1), dtype=np.float64)
         beta_max = np.full((n_samples, 1), np.inf)
 
         # Binary Search
@@ -182,7 +182,7 @@ class Metrics():
             P = P / row_sums
 
             # Calculate entropy
-            entropy = -1 * (P * np.log2(P, where=(P > 0))).sum(axis=1, keepdims=True)
+            entropy = -1 * (P * np.log2(P, where=(P > MACHINE_EPSILON))).sum(axis=1, keepdims=True)
             entropy_diff = entropy - desired_entropy
     
 
@@ -200,7 +200,6 @@ class Metrics():
             beta_max = np.where(should_increase_beta, beta_max, beta)
 
             beta_max_is_inf = (beta_max == np.inf)
-            beta_min_is_inf = (beta_min == -np.inf)
         
             # Update beta
 
@@ -210,11 +209,8 @@ class Metrics():
             mask = should_increase_beta & ~beta_max_is_inf
             beta[mask] = (beta[mask] + beta_max[mask]) / 2.0
 
-            mask = ~should_increase_beta & ~beta_min_is_inf
+            mask = ~should_increase_beta
             beta[mask] = (beta[mask] + beta_min[mask]) / 2.0
-
-            mask = ~should_increase_beta & beta_min_is_inf
-            beta[mask] = beta[mask] / 2.0
 
         return P
 
