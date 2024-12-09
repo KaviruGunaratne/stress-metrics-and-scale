@@ -86,11 +86,13 @@ if __name__ == "__main__":
     if not os.path.isdir("embeddings"):
         os.mkdir('embeddings')
 
+    datasets = os.listdir('datasets')
+    
     num_iter = 10
     size_limit = 5000
-    with tqdm.tqdm(total=len(os.listdir('datasets')) * num_iter) as pbar:
+    with tqdm.tqdm(total=len(datasets) * num_iter) as pbar:
 
-        for datasetStr in os.listdir("datasets"):
+        for datasetStr in datasets:
             X = np.load(f"datasets/{datasetStr}")
             if X.shape[0] > size_limit:
                 X = sample_down(X,size_limit)

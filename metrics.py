@@ -134,8 +134,7 @@ class Metrics():
         # High-dimensional probability space
         n_samples = self.X.shape[0]
         conditional_P = self._conditional_probabilities(perplexity)
-        P = (conditional_P + conditional_P.T) / (2 * n_samples)
-
+        P = ((conditional_P + conditional_P.T) / (2 * n_samples))
 
         # Compute low-dimensional probability space for all Y_batch
         Q_batch = np.where(
