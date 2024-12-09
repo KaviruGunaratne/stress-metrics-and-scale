@@ -1,7 +1,6 @@
 # Import necessary libraries
 import numpy as np 
 from sklearn.metrics import pairwise_distances
-
 import zadu
 
 MACHINE_EPSILON = np.finfo(np.float64).eps
@@ -140,7 +139,7 @@ class Metrics():
         Q_batch = np.where(
             self.dY_batch != 0,
             (np.square(self.dY_batch) + 1) ** -1,
-            0,
+            MACHINE_EPSILON,
         )
         Q_batch = Q_batch / Q_batch.sum(axis=(1, 2), keepdims=True)
 
