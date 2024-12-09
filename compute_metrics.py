@@ -111,37 +111,39 @@ def graph_kl(scales):
                 datasetName = "fashion_mnist"
             X = np.load(f"datasets/{datasetName}.npy")
 
+            print()
             print(f"Dataset: {datasetName}, size: {X.shape}")
+            print('---------------')
 
-            fig = plt.figure(figsize=(20, 10))
-            gs = GridSpec(2, 4, figure=fig)
-            graph_ax = fig.add_subplot(gs[0, :])
-            
-            for i, alg in enumerate(["RANDOM", "MDS", "UMAP", "TSNE"]):
-
-                Y = np.load(f"embeddings/{datasetName}_{alg}_0.npy")
-
-                M = Metrics(X, Y, scaling_factors=scales)
-                kl_divergences = M.compute_kl_divergences(perplexity=30)
-
-                graph_ax.plot(scales, kl_divergences, label=alg)
+            for n in range(10):
+                fig = plt.figure(figsize=(20, 10))
+                gs = GridSpec(2, 4, figure=fig)
+                graph_ax = fig.add_subplot(gs[0, :])
                 
-                alg_ax = fig.add_subplot(gs[1, i])
-                alg_ax.scatter(Y[:, 0], Y[:, 1], color='black', s=2)
-                alg_ax.set_title(f"{alg} Embedding")
+                for i, alg in enumerate(["RANDOM", "MDS", "UMAP", "TSNE"]):
 
-                pbar.update(1)
+                    Y = np.load(f"embeddings/{datasetName}_{alg}_{n}.npy")
 
-            graph_ax.set_title("KL Divergence w.r.t. Scale")
-            graph_ax.set_xlabel("Scaling Factor")
-            graph_ax.set_ylabel("KL Divergence")
-            graph_ax.legend()
+                    kl_divergences = __compute_kl_divergences_in_chunks(X, Y, scales, perplexity=30)
 
-            fig.suptitle(f'Variation of KL Divergence with scale for {datasetName} Dataset', fontweight='bold')
-            # plt.tight_layout()
+                    graph_ax.plot(scales, kl_divergences, label=alg)
+                    
+                    alg_ax = fig.add_subplot(gs[1, i])
+                    alg_ax.scatter(Y[:, 0], Y[:, 1], color='black', s=5)
+                    alg_ax.set_title(f"{alg} Embedding")
 
-            fig.savefig(f"test-kl-figures/{datasetName}.png")
-            plt.close(fig)
+                    pbar.update(1)
+
+                graph_ax.set_title("KL Divergence w.r.t. Scale")
+                graph_ax.set_xlabel("Scaling Factor")
+                graph_ax.set_ylabel("KL Divergence")
+                graph_ax.legend()
+
+                fig.suptitle(f'Variation of KL Divergence with scale for {datasetName} Dataset', fontweight='bold')
+                # plt.tight_layout()
+
+                fig.savefig(f"{target_dir}/{datasetName}_{n}.png")
+                plt.close(fig)
 
 
     # Add labels, title, and legend
@@ -149,6 +151,30 @@ def graph_kl(scales):
 
     # Show grid
     plt.grid(True)
+
+def __estimate_needed_memory(X, scales):
+    n_samples, n_dims = X.shape
+    n_scales = scales.shape[0]
+
+    return max(MACHINE_EPSILON, (0.03 * n_samples - 5) * n_scales + 0.0007 * n_samples * n_dims + 0.018 * n_samples ** 2)
+
+def __compute_kl_divergences_in_chunks(X, Y, scales, perplexity):
+    from psutil import virtual_memory
+
+    needed_memory = __estimate_needed_memory(X, scales)
+    usable_memory = virtual_memory().available / (1024 ** 2) * 0.7
+
+    kl_divergences = np.empty(0)
+
+    scale_ranges = np.array_split(scales, (needed_memory // usable_memory) + 1)
+    for scale_range in scale_ranges:
+
+        M = Metrics(X, Y, scaling_factors=scale_range)
+        kl_range = M.compute_kl_divergences(perplexity=perplexity)
+        kl_divergences = np.append(kl_divergences, kl_range)
+    
+    return kl_divergences
+
 
 
 if __name__ == "__main__":
