@@ -191,8 +191,8 @@ def log_min_kl(perplexity):
     if not os.path.isdir(target_dir):
         os.mkdir(target_dir)
 
-    # datasets = os.listdir('datasets')
-    datasets = ['epileptic.npy']
+    datasets = os.listdir('datasets')
+    # datasets = ['epileptic.npy']
     algorithms = ["RANDOM", "MDS", "UMAP", "TSNE"]
     n_runs = 5
 
