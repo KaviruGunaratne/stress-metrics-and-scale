@@ -229,7 +229,7 @@ def log_min_kl(perplexity):
                         Y = np.load(f"embeddings/{datasetName}_{alg}_{n}.npy")
                     except FileNotFoundError:
                         print(f"embeddings/{datasetName}_{alg}_{n}.npy does not exist.")
-                        print(f"Run {0} is skipped.")
+                        print(f"Run {n} is skipped.")
                         break
                     coords = calculate_min_kl(X, Y, perplexity)
                     min_kls.loc[(datasetName, f'Run {n}', 'x'), alg] = coords[0]
