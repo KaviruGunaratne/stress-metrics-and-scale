@@ -159,16 +159,15 @@ def __estimate_needed_memory(X, scales):
     n_samples, n_dims = X.shape
     n_scales = scales.shape[0]
 
-    return max(MACHINE_EPSILON, (0.03 * n_samples - 5) * n_scales + 0.0007 * n_samples * n_dims + 0.018 * n_samples ** 2)
+    return max(MACHINE_EPSILON, (0.018 * n_samples - 3) * n_scales + 0.0002 * n_samples * n_dims + 0.013 * n_samples ** 2)
 
 def __compute_kl_divergences_in_chunks(X, Y, scales, perplexity):
     from psutil import virtual_memory
 
     needed_memory = __estimate_needed_memory(X, scales)
-    usable_memory = virtual_memory().available / (1024 ** 2) * 0.7
+    usable_memory = virtual_memory().available / (1024 ** 2) * 0.6
 
     kl_divergences = np.empty(0)
-
     scale_ranges = np.array_split(scales, (needed_memory // usable_memory) + 1)
     for scale_range in scale_ranges:
 
