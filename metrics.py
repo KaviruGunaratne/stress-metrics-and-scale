@@ -97,18 +97,17 @@ class Metrics():
         perplexity : Perplexity as described in Hinton and Roweis (2002) https://www.cs.toronto.edu/~hinton/absps/sne.pdf
         """
         # High-dimensional probability space
-        n_samples, _ = self.X.shape
+        n_samples = self.X.shape[0]
         conditional_P = self._conditional_probabilities(perplexity)
         P = (conditional_P + conditional_P.T) / (2 * n_samples)    
 
         # Low-dimensional probability space
-        Q = np.where(self.dY != 0, (np.square(self.dY) + 1) ** -1, 0)
-        Q = Q / Q.sum()
+        Q = np.where(self.dY != 0, (np.square(self.dY) + 1) ** -1, MACHINE_EPSILON)
+        Q /= Q.sum()
 
         # Clip at machine epsilon to fix precision errors
-        epsilon = np.finfo(np.double).eps
-        P = np.clip(P, epsilon, 1)
-        Q = np.clip(Q, epsilon, 1)
+        P = np.clip(P, MACHINE_EPSILON, 1)
+        Q = np.clip(Q, MACHINE_EPSILON, 1)
 
         # KL Divergence
         log_P = np.where(P > 0, np.log2(P), 0)
@@ -141,7 +140,7 @@ class Metrics():
             (np.square(self.dY_batch) + 1) ** -1,
             MACHINE_EPSILON,
         )
-        Q_batch = Q_batch / Q_batch.sum(axis=(1, 2), keepdims=True)
+        Q_batch /= Q_batch.sum(axis=(1, 2), keepdims=True)
 
         # Clip at machine epsilon to fix precision errors
         P = np.clip(P, MACHINE_EPSILON, 1)
@@ -166,10 +165,10 @@ class Metrics():
         perplexity : Perplexity as described in Hinton and Roweis (2002) https://www.cs.toronto.edu/~hinton/absps/sne.pdf
         steps : Number of steps for binary search for variances of Gaussian distributions
         """
-        n_samples, _ = self.X.shape
+        n_samples = self.X.shape[0]
         desired_entropy = np.full((n_samples, 1), np.log2(perplexity))
         beta = np.ones((n_samples, 1)) # (2 * var_i ** 2) in the exponent of the Gaussian distribution
-        beta_min = beta_min = np.zeros((n_samples, 1), dtype=np.float64)
+        beta_min = np.zeros((n_samples, 1), dtype=np.float64)
         beta_max = np.full((n_samples, 1), np.inf)
 
         # Binary Search

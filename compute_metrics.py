@@ -3,6 +3,10 @@ import numpy as np
 import json
 import os
 import tqdm
+from scipy.optimize import minimize_scalar
+import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
+import pandas as pd
 
 from metrics import Metrics
 from metrics import MACHINE_EPSILON
@@ -92,18 +96,19 @@ def test_curve():
 
 
 def graph_kl(scales):
-    import matplotlib.pyplot as plt
-    from matplotlib.gridspec import GridSpec
 
-    if not os.path.isdir("test-kl-figures"):
-        os.mkdir('test-kl-figures')
+    target_dir = 'test-kl-figures'
+
+    if not os.path.isdir(target_dir):
+        os.mkdir(target_dir)
 
     datasets = os.listdir('datasets')
     # datasets = ['orl.npy', 'har.npy', 'coil20.npy', 'cnae9.npy']
+    algorithms = ["RANDOM", "MDS", "UMAP", "TSNE"]
+    n_runs = 10
     
 
-
-    with tqdm.tqdm(total=len(datasets) * 4) as pbar:
+    with tqdm.tqdm(total=len(datasets) * len(algorithms) * n_runs) as pbar:
 
         for datasetStr in datasets:
             datasetName = datasetStr.replace(".npy", "")
@@ -111,16 +116,14 @@ def graph_kl(scales):
                 datasetName = "fashion_mnist"
             X = np.load(f"datasets/{datasetName}.npy")
 
-            print()
-            print(f"Dataset: {datasetName}, size: {X.shape}")
-            print('---------------')
+            for n in range(n_runs):
+                pbar.set_postfix_str(f"Dataset={datasetName} (shape={X.shape}), Run={n}")
 
-            for n in range(10):
                 fig = plt.figure(figsize=(20, 10))
                 gs = GridSpec(2, 4, figure=fig)
                 graph_ax = fig.add_subplot(gs[0, :])
                 
-                for i, alg in enumerate(["RANDOM", "MDS", "UMAP", "TSNE"]):
+                for i, alg in enumerate(algorithms):
 
                     Y = np.load(f"embeddings/{datasetName}_{alg}_{n}.npy")
 
