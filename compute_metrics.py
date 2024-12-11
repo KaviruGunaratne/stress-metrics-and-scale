@@ -177,9 +177,88 @@ def __compute_kl_divergences_in_chunks(X, Y, scales, perplexity):
     
     return kl_divergences
 
+def log_min_kl(perplexity):
+    """
+    Calculate and log the scale at which KL Divergence is minimized and the corresponding KL Divergence for every single embedding.
+    The data is stored as a CSV file in target_dir/target_csv_file.
+    To load the CSV file into a Pandas.DataFrame, execute the following line: \\
+    `pd.read_csv(f'{target_dir}/{target_csv_file}', index_col=[0, 1, 2])`
+    """
+    target_dir = 'test-kl-figures'
+    target_csv_file = 'min_kls.csv'
+
+    # Create target_dir if not exists
+    if not os.path.isdir(target_dir):
+        os.mkdir(target_dir)
+
+    # datasets = os.listdir('datasets')
+    datasets = ['epileptic.npy']
+    algorithms = ["RANDOM", "MDS", "UMAP", "TSNE"]
+    n_runs = 5
+
+    # Load DataFrame if CSV file exists, else initialize new DataFrame
+    if os.path.exists(f"{target_dir}/{target_csv_file}"):
+        min_kls = pd.read_csv(f'{target_dir}/{target_csv_file}', index_col=[0, 1, 2])
+    else:
+        index = pd.MultiIndex.from_product(
+            [[datasetStr.replace(".npy", "") for datasetStr in datasets],
+            [f'Run {i}' for i in range(n_runs)],
+            ['x', 'y']],
+            names=["Dataset", "Run", "Coord"]
+        )
+
+        min_kls = pd.DataFrame(index=index, columns=algorithms)
+    min_kls = min_kls.sort_index()
+    
+
+    # Record min KL 
+    with tqdm.tqdm(total=(len(datasets) * n_runs * len(algorithms))) as pbar:
+
+        for datasetStr in datasets:
+            datasetName = datasetStr.replace(".npy", "")
+            if "fashion_mnist" in datasetStr:
+                datasetName = "fashion_mnist"
+
+            X = np.load(f"datasets/{datasetName}.npy")
+
+            for n in range(n_runs):
+                pbar.set_postfix_str(f"Dataset={datasetName}, Run={n}")
+
+                for alg in algorithms:
+                    try:
+                        Y = np.load(f"embeddings/{datasetName}_{alg}_{n}.npy")
+                    except FileNotFoundError:
+                        print(f"embeddings/{datasetName}_{alg}_{n}.npy does not exist.")
+                        print(f"Run {0} is skipped.")
+                        break
+                    coords = calculate_min_kl(X, Y, perplexity)
+                    min_kls.loc[(datasetName, f'Run {n}', 'x'), alg] = coords[0]
+                    min_kls.loc[(datasetName, f'Run {n}', 'y'), alg] = coords[1]
+
+                    pbar.update(1)
+                min_kls.to_csv(f"{target_dir}/{target_csv_file}")
+
+
+    min_kls.to_csv(f"{target_dir}/{target_csv_file}")
+    print(min_kls)
+
+
+def calculate_min_kl(X, Y, perplexity):
+    """
+    Use minimize_scalar in Scipy.optimize to find the inimizing coordinates of KL Divergence w.r.t. scale.
+    """
+    def get_kl(scale):
+        M = Metrics(X, Y * scale, scaling_factors=np.empty(0))
+        return M.compute_kl_divergence(perplexity=perplexity)
+    
+    res = minimize_scalar(get_kl, bounds=(0, 100))
+    return (res.x, res.fun)
+
+                    
 
 
 if __name__ == "__main__":
     compute_all_metrics()
     # test_curve()
-    graph_kl(scales=np.linspace(MACHINE_EPSILON, 20, 100))
+    graph_kl(scales=np.linspace(0, 20, 250))
+    log_min_kl(perplexity=30)
