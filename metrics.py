@@ -102,16 +102,13 @@ class Metrics():
         P = (conditional_P + conditional_P.T) / (2 * n_samples)    
 
         # Low-dimensional probability space
-        Q = np.where(self.dY != 0, (np.square(self.dY) + 1) ** -1, MACHINE_EPSILON)
+        Q = (np.square(self.dY) + 1) ** -1
+        np.fill_diagonal(Q, 0)
         Q /= Q.sum()
 
-        # Clip at machine epsilon to fix precision errors
-        P = np.clip(P, MACHINE_EPSILON, 1)
-        Q = np.clip(Q, MACHINE_EPSILON, 1)
-
         # KL Divergence
-        log_P = np.where(P > 0, np.log2(P), 0)
-        log_Q = np.where(Q > 0, np.log2(Q), 0)
+        log_P = np.log2(P, where=(P > 0))
+        log_Q = np.log2(Q, where=(Q > 0))
         kl_divergence = (P * (log_P - log_Q)).sum()
 
 
@@ -135,20 +132,14 @@ class Metrics():
         P = ((conditional_P + conditional_P.T) / (2 * n_samples))
 
         # Compute low-dimensional probability space for all Y_batch
-        Q_batch = np.where(
-            self.dY_batch != 0,
-            (np.square(self.dY_batch) + 1) ** -1,
-            MACHINE_EPSILON,
-        )
+        Q_batch = (np.square(self.dY_batch) + 1) ** -1
+        rows = np.arange(Q_batch.shape[1])
+        Q_batch[:, rows, rows] = 0 # Fill diagonal with 0
         Q_batch /= Q_batch.sum(axis=(1, 2), keepdims=True)
 
-        # Clip at machine epsilon to fix precision errors
-        P = np.clip(P, MACHINE_EPSILON, 1)
-        Q_batch = np.clip(Q_batch, MACHINE_EPSILON, 1)
-
         # KL Divergence for all Y_batch
-        log_P = np.log2(P)
-        log_Q_batch = np.log2(Q_batch)
+        log_P = np.log2(P, where=(P > 0))
+        log_Q_batch = np.log2(Q_batch, where=(Q_batch > 0))
 
         kl_divergences = (P * (log_P - log_Q_batch)).sum(axis=(1, 2))
         return kl_divergences
