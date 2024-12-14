@@ -108,7 +108,9 @@ def graph_kl(scales, target_dir, min_kl_data_file, n_runs=10):
     datasets = os.listdir('datasets')
     # datasets = ['orl.npy', 'har.npy', 'coil20.npy', 'cnae9.npy']
     algorithms = ["RANDOM", "MDS", "UMAP", "TSNE"]
-    n_runs = 10
+
+    # Load minimum point data
+    min_kls = pd.read_csv(f'{target_dir}/{min_kl_data_file}', index_col=[0, 1, 2])
     
 
     with tqdm.tqdm(total=len(datasets) * len(algorithms) * n_runs) as pbar:
@@ -131,31 +133,35 @@ def graph_kl(scales, target_dir, min_kl_data_file, n_runs=10):
 
                     kl_divergences = _compute_kl_divergences_in_chunks(X, Y, scales, perplexity=30)
 
+                    # Plot kl vs. scale graph for alg
                     graph_ax.plot(scales, kl_divergences, label=alg)
+                    # Plot minimum point
+                    min_x = min_kls.loc[datasetName, f'Run {n}', 'x'][alg]
+                    min_y = min_kls.loc[datasetName, f'Run {n}', 'y'][alg]
+                    if min_x < scales[-1]:
+                        graph_ax.scatter(min_x, min_y, marker='X', label=f"{alg} Minimum")
                     
-                    alg_ax = fig.add_subplot(gs[1, i])
-                    alg_ax.scatter(Y[:, 0], Y[:, 1], color='black', s=5)
+                    # Plot embedding
+                    alg_ax = fig.add_subplot(gs[2, i])
+                    alg_ax.scatter(Y[:, 0], Y[:, 1], color='black', s=10, alpha=0.2)
                     alg_ax.set_title(f"{alg} Embedding")
 
                     pbar.update(1)
 
-                graph_ax.set_title("KL Divergence w.r.t. Scale")
-                graph_ax.set_xlabel("Scaling Factor")
-                graph_ax.set_ylabel("KL Divergence")
+                graph_ax.set_title("KL Divergence w.r.t. Scale", fontdict={'fontsize': 22})
+                graph_ax.set_xlabel("Scaling Factor", fontdict={'fontsize': 17})
+                graph_ax.set_ylabel("KL Divergence", fontdict={'fontsize': 17})
                 graph_ax.legend()
+                graph_ax.grid(True)
 
-                fig.suptitle(f'Variation of KL Divergence with scale for {datasetName} Dataset', fontweight='bold')
+                fig.subplots_adjust(hspace=0.5)
+                fig.suptitle(f'Variation of KL Divergence with scale for {datasetName.capitalize()} Dataset', fontweight='bold')
                 # plt.tight_layout()
 
                 fig.savefig(f"{target_dir}/{datasetName}_{n}.png")
                 plt.close(fig)
 
 
-    # Add labels, title, and legend
-    plt.legend()
-
-    # Show grid
-    plt.grid(True)
 
 def __estimate_needed_memory(X, scales):
     n_samples, n_dims = X.shape
