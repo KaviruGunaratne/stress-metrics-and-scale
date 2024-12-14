@@ -95,9 +95,12 @@ def test_curve():
             #     json.dump(results,fdata,indent=4)
 
 
-def graph_kl(scales):
-
-    target_dir = 'test-kl-figures'
+def graph_kl(scales, target_dir, min_kl_data_file, n_runs=10):
+    """
+    Plot KL Divergence vs. scale graphs for each group of embeddings in embeddings/
+    Run log_min_kl first in order to draw the minimum points of the graphs.
+    """
+   
 
     if not os.path.isdir(target_dir):
         os.mkdir(target_dir)
@@ -119,15 +122,14 @@ def graph_kl(scales):
             for n in range(n_runs):
                 pbar.set_postfix_str(f"Dataset={datasetName} (shape={X.shape}), Run={n}")
 
-                fig = plt.figure(figsize=(20, 10))
-                gs = GridSpec(2, 4, figure=fig)
-                graph_ax = fig.add_subplot(gs[0, :])
+                fig = plt.figure(figsize=(20, 15))
+                gs = GridSpec(3, 4, figure=fig)
+                graph_ax = fig.add_subplot(gs[0:2, :])
                 
                 for i, alg in enumerate(algorithms):
-
                     Y = np.load(f"embeddings/{datasetName}_{alg}_{n}.npy")
 
-                    kl_divergences = __compute_kl_divergences_in_chunks(X, Y, scales, perplexity=30)
+                    kl_divergences = _compute_kl_divergences_in_chunks(X, Y, scales, perplexity=30)
 
                     graph_ax.plot(scales, kl_divergences, label=alg)
                     
@@ -161,7 +163,7 @@ def __estimate_needed_memory(X, scales):
 
     return max(MACHINE_EPSILON, (0.018 * n_samples - 3) * n_scales + 0.0002 * n_samples * n_dims + 0.013 * n_samples ** 2)
 
-def __compute_kl_divergences_in_chunks(X, Y, scales, perplexity):
+def _compute_kl_divergences_in_chunks(X, Y, scales, perplexity):
     from psutil import virtual_memory
 
     needed_memory = __estimate_needed_memory(X, scales)
@@ -177,15 +179,13 @@ def __compute_kl_divergences_in_chunks(X, Y, scales, perplexity):
     
     return kl_divergences
 
-def log_min_kl(perplexity):
+def log_min_kl(perplexity, target_dir, target_csv_file, n_runs=10):
     """
     Calculate and log the scale at which KL Divergence is minimized and the corresponding KL Divergence for every single embedding.
     The data is stored as a CSV file in target_dir/target_csv_file.
     To load the CSV file into a Pandas.DataFrame, execute the following line: \\
     `pd.read_csv(f'{target_dir}/{target_csv_file}', index_col=[0, 1, 2])`
     """
-    target_dir = 'test-kl-figures'
-    target_csv_file = 'min_kls.csv'
 
     # Create target_dir if not exists
     if not os.path.isdir(target_dir):
@@ -260,5 +260,7 @@ def calculate_min_kl(X, Y, perplexity):
 if __name__ == "__main__":
     compute_all_metrics()
     # test_curve()
-    graph_kl(scales=np.linspace(0, 20, 250))
-    log_min_kl(perplexity=30)
+    target_dir = 'test-kl-figures'
+    min_kl_csv_file = 'min_kls_new.csv'
+    log_min_kl(perplexity=30, n_runs=7, target_dir=target_dir, target_csv_file=min_kl_csv_file)
+    graph_kl(scales=np.linspace(0, 15, 250), target_dir=target_dir, min_kl_data_file=min_kl_csv_file, n_runs=10)
