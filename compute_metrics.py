@@ -228,6 +228,12 @@ def log_min_kl(perplexity, target_dir, target_csv_file, n_runs=10):
             X = np.load(f"datasets/{datasetName}.npy")
 
             for n in range(n_runs):
+                # Skip if data has already been filled
+                if min_kls.loc[datasetName, f"Run {n}"].notna().all(axis=None):
+                    print(f"Entries for {datasetName}, Run {n} have already been computed. Skipped.")
+                    pbar.update(4)
+                    continue
+
                 pbar.set_postfix_str(f"Dataset={datasetName}, Run={n}")
 
                 for alg in algorithms:
