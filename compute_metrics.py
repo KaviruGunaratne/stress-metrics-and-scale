@@ -263,7 +263,7 @@ def calculate_min_kl(X, Y, perplexity):
         M = Metrics(X, Y * scale, scaling_factors=np.empty(0))
         return M.compute_kl_divergence(perplexity=perplexity)
     
-    res = minimize_scalar(get_kl, bounds=(0, 100))
+    res = minimize_scalar(get_kl, bounds=(0, 300))
     return (res.x, res.fun)
 
                     
