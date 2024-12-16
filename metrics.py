@@ -3,13 +3,17 @@ import numpy as np
 from sklearn.metrics import pairwise_distances
 import zadu
 
-MACHINE_EPSILON = np.finfo(np.float64).eps
+# MACHINE_EPSILON = np.finfo(np.float64).eps
+MACHINE_EPSILON = 1e-5
+
+#TODO: Add check that no two points are too close; if they are, add small random noise
 
 class Metrics():
     """
     Class for computing various stress metrics between high-dimensional and low-dimensional data.
     """
-    def __init__(self, X, Y, scaling_factors = np.linspace(MACHINE_EPSILON, 20, 100)):
+    def __init__(self, X, Y, 
+            setbatch=False, scaling_factors = np.linspace(MACHINE_EPSILON, 20, 100)):
         """
         Initialize the Metrics class with high-dimensional data X and low-dimensional data Y.
         Compute pairwise distances within X and Y.
@@ -18,11 +22,14 @@ class Metrics():
         self.X = X 
         self.Y = Y 
 
-        self.dX = pairwise_distances(X)
-        self.dY = pairwise_distances(Y)
+        self.dX = pairwise_distances(X).astype(np.float16)
+        self.dY = pairwise_distances(Y).astype(np.float16)
 
+        if setbatch: self.setBatch(scaling_factors)
+
+    def setBatch(self,scaling_factors=np.linspace(MACHINE_EPSILON,20,100)):
         self.Y_batch = self.Y[None , :, :] * scaling_factors[ :, None, None]
-        self.dY_batch = np.array([pairwise_distances(Y) for Y in self.Y_batch])
+        self.dY_batch = np.array([pairwise_distances(Y) for Y in self.Y_batch])     
 
     def setY(self,Y):
         """
@@ -106,13 +113,20 @@ class Metrics():
         Q /= Q.sum()
 
         # Clip at machine epsilon to fix precision errors
-        P = np.clip(P, MACHINE_EPSILON, 1)
-        Q = np.clip(Q, MACHINE_EPSILON, 1)
+        # P = np.clip(P, MACHINE_EPSILON, 1)
+        # Q = np.clip(Q, MACHINE_EPSILON, 1)
 
         # KL Divergence
-        log_P = np.where(P > 0, np.log2(P), 0)
-        log_Q = np.where(Q > 0, np.log2(Q), 0)
-        kl_divergence = (P * (log_P - log_Q)).sum()
+        # log_P = np.where(P > 0, np.log2(np.maximum(P,MACHINE_EPSILON)), 0)
+        # log_Q = np.where(Q > 0, np.log2(np.maximum(Q,MACHINE_EPSILON)), 0)
+        # kl_divergence = (P * (log_P - log_Q)).sum()
+        np.fill_diagonal(Q,0.0)
+        from scipy.spatial.distance import squareform
+        P = squareform((P + P.T) / 2)
+        Q = squareform((Q + Q.T) / 2)
+        log_P = np.log2(np.maximum(P,MACHINE_EPSILON))
+        log_q = np.log2(np.maximum(Q,MACHINE_EPSILON))
+        kl_divergence = (P * (log_P - log_q)).sum()
 
 
         return kl_divergence
