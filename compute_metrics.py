@@ -95,9 +95,12 @@ def test_curve():
             #     json.dump(results,fdata,indent=4)
 
 
-def graph_kl(scales):
-
-    target_dir = 'test-kl-figures'
+def graph_kl(scales, target_dir, min_kl_data_file, n_runs=10):
+    """
+    Plot KL Divergence vs. scale graphs for each group of embeddings in embeddings/
+    Run log_min_kl first in order to draw the minimum points of the graphs.
+    """
+   
 
     if not os.path.isdir(target_dir):
         os.mkdir(target_dir)
@@ -105,7 +108,9 @@ def graph_kl(scales):
     datasets = os.listdir('datasets')
     # datasets = ['orl.npy', 'har.npy', 'coil20.npy', 'cnae9.npy']
     algorithms = ["RANDOM", "MDS", "UMAP", "TSNE"]
-    n_runs = 10
+
+    # Load minimum point data
+    min_kls = pd.read_csv(f'{target_dir}/{min_kl_data_file}', index_col=[0, 1, 2])
     
 
     with tqdm.tqdm(total=len(datasets) * len(algorithms) * n_runs) as pbar:
@@ -119,41 +124,44 @@ def graph_kl(scales):
             for n in range(n_runs):
                 pbar.set_postfix_str(f"Dataset={datasetName} (shape={X.shape}), Run={n}")
 
-                fig = plt.figure(figsize=(20, 10))
-                gs = GridSpec(2, 4, figure=fig)
-                graph_ax = fig.add_subplot(gs[0, :])
+                fig = plt.figure(figsize=(20, 15))
+                gs = GridSpec(3, 4, figure=fig)
+                graph_ax = fig.add_subplot(gs[0:2, :])
                 
                 for i, alg in enumerate(algorithms):
-
                     Y = np.load(f"embeddings/{datasetName}_{alg}_{n}.npy")
 
-                    kl_divergences = __compute_kl_divergences_in_chunks(X, Y, scales, perplexity=30)
+                    kl_divergences = _compute_kl_divergences_in_chunks(X, Y, scales, perplexity=30)
 
+                    # Plot kl vs. scale graph for alg
                     graph_ax.plot(scales, kl_divergences, label=alg)
+                    # Plot minimum point
+                    min_x = min_kls.loc[datasetName, f'Run {n}', 'x'][alg]
+                    min_y = min_kls.loc[datasetName, f'Run {n}', 'y'][alg]
+                    if min_x < scales[-1]:
+                        graph_ax.scatter(min_x, min_y, marker='X', label=f"{alg} Minimum")
                     
-                    alg_ax = fig.add_subplot(gs[1, i])
-                    alg_ax.scatter(Y[:, 0], Y[:, 1], color='black', s=5)
+                    # Plot embedding
+                    alg_ax = fig.add_subplot(gs[2, i])
+                    alg_ax.scatter(Y[:, 0], Y[:, 1], color='black', s=10, alpha=0.2)
                     alg_ax.set_title(f"{alg} Embedding")
 
                     pbar.update(1)
 
-                graph_ax.set_title("KL Divergence w.r.t. Scale")
-                graph_ax.set_xlabel("Scaling Factor")
-                graph_ax.set_ylabel("KL Divergence")
+                graph_ax.set_title("KL Divergence w.r.t. Scale", fontdict={'fontsize': 22})
+                graph_ax.set_xlabel("Scaling Factor", fontdict={'fontsize': 17})
+                graph_ax.set_ylabel("KL Divergence", fontdict={'fontsize': 17})
                 graph_ax.legend()
+                graph_ax.grid(True)
 
-                fig.suptitle(f'Variation of KL Divergence with scale for {datasetName} Dataset', fontweight='bold')
+                fig.subplots_adjust(hspace=0.5)
+                fig.suptitle(f'Variation of KL Divergence with scale for {datasetName.capitalize()} Dataset', fontweight='bold')
                 # plt.tight_layout()
 
                 fig.savefig(f"{target_dir}/{datasetName}_{n}.png")
                 plt.close(fig)
 
 
-    # Add labels, title, and legend
-    plt.legend()
-
-    # Show grid
-    plt.grid(True)
 
 def __estimate_needed_memory(X, scales):
     n_samples, n_dims = X.shape
@@ -161,7 +169,7 @@ def __estimate_needed_memory(X, scales):
 
     return max(MACHINE_EPSILON, (0.018 * n_samples - 3) * n_scales + 0.0002 * n_samples * n_dims + 0.013 * n_samples ** 2)
 
-def __compute_kl_divergences_in_chunks(X, Y, scales, perplexity):
+def _compute_kl_divergences_in_chunks(X, Y, scales, perplexity):
     from psutil import virtual_memory
 
     needed_memory = __estimate_needed_memory(X, scales)
@@ -177,15 +185,13 @@ def __compute_kl_divergences_in_chunks(X, Y, scales, perplexity):
     
     return kl_divergences
 
-def log_min_kl(perplexity):
+def log_min_kl(perplexity, target_dir, target_csv_file, n_runs=10):
     """
     Calculate and log the scale at which KL Divergence is minimized and the corresponding KL Divergence for every single embedding.
     The data is stored as a CSV file in target_dir/target_csv_file.
     To load the CSV file into a Pandas.DataFrame, execute the following line: \\
     `pd.read_csv(f'{target_dir}/{target_csv_file}', index_col=[0, 1, 2])`
     """
-    target_dir = 'test-kl-figures'
-    target_csv_file = 'min_kls.csv'
 
     # Create target_dir if not exists
     if not os.path.isdir(target_dir):
@@ -222,6 +228,12 @@ def log_min_kl(perplexity):
             X = np.load(f"datasets/{datasetName}.npy")
 
             for n in range(n_runs):
+                # Skip if data has already been filled
+                if min_kls.loc[datasetName, f"Run {n}"].notna().all(axis=None):
+                    print(f"Entries for {datasetName}, Run {n} have already been computed. Skipped.")
+                    pbar.update(4)
+                    continue
+
                 pbar.set_postfix_str(f"Dataset={datasetName}, Run={n}")
 
                 for alg in algorithms:
@@ -229,7 +241,7 @@ def log_min_kl(perplexity):
                         Y = np.load(f"embeddings/{datasetName}_{alg}_{n}.npy")
                     except FileNotFoundError:
                         print(f"embeddings/{datasetName}_{alg}_{n}.npy does not exist.")
-                        print(f"Run {0} is skipped.")
+                        print(f"Run {n} is skipped.")
                         break
                     coords = calculate_min_kl(X, Y, perplexity)
                     min_kls.loc[(datasetName, f'Run {n}', 'x'), alg] = coords[0]
@@ -251,7 +263,7 @@ def calculate_min_kl(X, Y, perplexity):
         M = Metrics(X, Y * scale, scaling_factors=np.empty(0))
         return M.compute_kl_divergence(perplexity=perplexity)
     
-    res = minimize_scalar(get_kl, bounds=(0, 100))
+    res = minimize_scalar(get_kl, bounds=(0, 300))
     return (res.x, res.fun)
 
                     
@@ -260,5 +272,7 @@ def calculate_min_kl(X, Y, perplexity):
 if __name__ == "__main__":
     compute_all_metrics()
     # test_curve()
-    graph_kl(scales=np.linspace(0, 20, 250))
-    log_min_kl(perplexity=30)
+    target_dir = 'test-kl-figures'
+    min_kl_csv_file = 'min_kls_new.csv'
+    log_min_kl(perplexity=30, n_runs=7, target_dir=target_dir, target_csv_file=min_kl_csv_file)
+    graph_kl(scales=np.linspace(0, 15, 250), target_dir=target_dir, min_kl_data_file=min_kl_csv_file, n_runs=10)
