@@ -266,6 +266,75 @@ def calculate_min_kl(X, Y, perplexity):
     res = minimize_scalar(get_kl, bounds=(0, 300))
     return (res.x, res.fun)
 
+def log_normalized_kl(perplexity, target_dir, target_csv_file, n_runs=10):
+    # Create target_dir if not exists
+    if not os.path.isdir(target_dir):
+        os.mkdir(target_dir)
+
+    datasets = os.listdir('datasets')
+    algorithms = ["RANDOM", "MDS", "UMAP", "TSNE"]
+
+    # Load DataFrame if CSV file exists, else initialize new DataFrame
+    if os.path.exists(f"{target_dir}/{target_csv_file}"):
+        zadu_kls = pd.read_csv(f'{target_dir}/{target_csv_file}', index_col=[0, 1, 2])
+    else:
+        index = pd.MultiIndex.from_product(
+            [
+                [datasetStr.replace(".npy", "") for datasetStr in datasets],
+                [f'Run {i}' for i in range(n_runs)],
+                ['x', 'y']
+            ],
+            names=["Dataset", "Run", "Coord"]
+        )
+
+        zadu_kls = pd.DataFrame(index=index, columns=algorithms)
+        zadu_kls.to_csv(f"{target_dir}/{target_csv_file}")
+        
+    zadu_kls = zadu_kls.sort_index()
+    
+
+    # Record KL after normalizing 
+    with tqdm.tqdm(total=(len(datasets) * (n_runs) * len(algorithms))) as pbar:
+
+        for datasetStr in datasets:
+            datasetName = datasetStr.replace(".npy", "")
+            if "fashion_mnist" in datasetStr:
+                datasetName = "fashion_mnist"
+
+            X = np.load(f"datasets/{datasetName}.npy")
+            dX = pairwise_distances(X)
+            dX /= np.max(dX)
+
+            for n in range(n_runs):
+                # Skip if data has already been filled
+                if zadu_kls.loc[datasetName, f"Run {n}"].notna().all(axis=None):
+                    print(f"Entries for {datasetName}, Run {n} have already been computed. Skipped.")
+                    pbar.update(4)
+                    continue
+
+                pbar.set_postfix_str(f"Dataset={datasetName}, Run={n}")
+
+                for alg in algorithms:
+                    try:
+                        Y = np.load(f"embeddings/{datasetName}_{alg}_{n}.npy")
+                        dY = pairwise_distances(Y)
+                        
+                        normalizing_factor = 1/ np.max(dY)
+                        dY *= normalizing_factor
+                    except FileNotFoundError:
+                        print(f"embeddings/{datasetName}_{alg}_{n}.npy does not exist.")
+                        print(f"Run {n} is skipped.")
+                        break
+
+                    M = Metrics(dX, dY, precomputed=True, setbatch=False)
+                    zadu_kls.loc[(datasetName, f'Run {n}', 'x'), alg] = normalizing_factor
+                    zadu_kls.loc[(datasetName, f'Run {n}', 'y'), alg] = M.compute_kl_divergence(perplexity=perplexity)
+                    
+                    pbar.update(1)
+                zadu_kls.to_csv(f"{target_dir}/{target_csv_file}")
+
+
+    zadu_kls.to_csv(f"{target_dir}/{target_csv_file}")
                     
 
 
