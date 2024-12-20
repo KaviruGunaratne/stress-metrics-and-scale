@@ -337,6 +337,69 @@ def log_normalized_kl(perplexity, target_dir, target_csv_file, n_runs=10):
     zadu_kls.to_csv(f"{target_dir}/{target_csv_file}")
                     
 
+def kl_at_scale(perplexity, target_dir, target_csv_file, scales, n_runs):
+
+    # Create target_dir if not exists
+    if not os.path.isdir(target_dir):
+        os.mkdir(target_dir)
+
+    datasets = os.listdir('datasets')
+    algorithms = ["RANDOM", "MDS", "UMAP", "TSNE"]
+
+    # Load DataFrame if CSV file exists, else initialize new DataFrame
+    if os.path.exists(f"{target_dir}/{target_csv_file}"):
+        kls_at_scales = pd.read_csv(f'{target_dir}/{target_csv_file}', index_col=[0, 1, 2])
+    else:
+        index = pd.MultiIndex.from_product(
+            [[datasetStr.replace(".npy", "") for datasetStr in datasets],
+            [f'Run {i}' for i in range(n_runs)],
+            scales],
+            names=["Dataset", "Run", "Scale"]
+        )
+
+        kls_at_scales = pd.DataFrame(index=index, columns=algorithms)
+    kls_at_scales = kls_at_scales.sort_index()
+    
+
+    # Record min KL 
+    with tqdm.tqdm(total=(len(datasets) * (n_runs) * len(algorithms))) as pbar:
+
+        for datasetStr in datasets:
+            datasetName = datasetStr.replace(".npy", "")
+            if "fashion_mnist" in datasetStr:
+                datasetName = "fashion_mnist"
+
+            X = np.load(f"datasets/{datasetName}.npy")
+
+            for n in range(n_runs):
+                # Skip if data has already been filled
+                if kls_at_scales.loc[datasetName, f"Run {n}"].notna().all(axis=None):
+                    print(f"Entries for {datasetName}, Run {n} have already been computed. Skipped.")
+                    pbar.update(4)
+                    continue
+
+                pbar.set_postfix_str(f"Dataset={datasetName}, Run={n}")
+
+                for alg in algorithms:
+                    try:
+                        Y = np.load(f"embeddings/{datasetName}_{alg}_{n}.npy")
+                    except FileNotFoundError:
+                        print(f"embeddings/{datasetName}_{alg}_{n}.npy does not exist.")
+                        print(f"Run {n} is skipped.")
+                        break
+                    
+                    M = Metrics(X, Y, setbatch=True, precomputed=False, scaling_factors=scales)
+                    kls = M.compute_kl_divergences(perplexity=perplexity)
+
+                    for scale, kl in zip(scales, kls):
+                        kls_at_scales.loc[(datasetName, f'Run {n}', scale), alg] = kl
+
+                    pbar.update(1)
+                kls_at_scales.to_csv(f"{target_dir}/{target_csv_file}")
+
+
+    kls_at_scales.to_csv(f"{target_dir}/{target_csv_file}")
+
 
 if __name__ == "__main__":
     compute_all_metrics()
