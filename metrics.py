@@ -3,8 +3,7 @@ import numpy as np
 from sklearn.metrics import pairwise_distances
 import zadu
 
-# MACHINE_EPSILON = np.finfo(np.float64).eps
-MACHINE_EPSILON = 1e-5
+MACHINE_EPSILON = np.finfo(np.float64).eps
 
 #TODO: Add check that no two points are too close; if they are, add small random noise
 
@@ -13,23 +12,50 @@ class Metrics():
     Class for computing various stress metrics between high-dimensional and low-dimensional data.
     """
     def __init__(self, X, Y, 
-            setbatch=False, scaling_factors = np.linspace(MACHINE_EPSILON, 20, 100)):
+            setbatch=True, precomputed=False, scaling_factors = None):
         """
         Initialize the Metrics class with high-dimensional data X and low-dimensional data Y.
         Compute pairwise distances within X and Y.
         Also compute pairwise distances within Y for different scales in scaling_factors
+
+        Parameters
+        ----------
+        X : 2D array
+          Dataset as numpy array
+
+        Y : 2D array
+          Embedding as numpy array
+
+        setbatch: bool
+          If True, computes embeddings at the different scales specified in scaling_factors
+
+        precomputed: bool
+          If True, X and Y are considered to be the distance matrices dX and dY of the dataset and embedding respectively.
+          All computations that explicitly require the original data will either return an error or not work as expected.
+
+        scaling_factors: 1D array
+          Scales at which to rescale Y
+
         """
-        self.X = X 
-        self.Y = Y 
+        if precomputed:
+            self.dX = X
+            self.dY = Y
+        else:
+            self.X = X
+            self.Y = Y 
 
-        self.dX = pairwise_distances(X).astype(np.float16)
-        self.dY = pairwise_distances(Y).astype(np.float16)
+            self.dX = pairwise_distances(X)
+            self.dY = pairwise_distances(Y)
 
-        if setbatch: self.setBatch(scaling_factors)
+        if setbatch:
+            self.setBatch(scaling_factors, precomputed=precomputed)
 
-    def setBatch(self,scaling_factors=np.linspace(MACHINE_EPSILON,20,100)):
-        self.Y_batch = self.Y[None , :, :] * scaling_factors[ :, None, None]
-        self.dY_batch = np.array([pairwise_distances(Y) for Y in self.Y_batch])     
+    def setBatch(self,scaling_factors=np.linspace(MACHINE_EPSILON,20,100), precomputed=False):
+        if precomputed:
+            self.dY_batch = self.Y[None, :, :] * scaling_factors[:, None, None]
+        else:
+            self.Y_batch = self.Y[None , :, :] * scaling_factors[ :, None, None]
+            self.dY_batch = np.array([pairwise_distances(Y) for Y in self.Y_batch])     
 
     def setY(self,Y):
         """
@@ -104,18 +130,29 @@ class Metrics():
         perplexity : Perplexity as described in Hinton and Roweis (2002) https://www.cs.toronto.edu/~hinton/absps/sne.pdf
         """
         # High-dimensional probability space
-        n_samples = self.X.shape[0]
+        n_samples = self.dX.shape[0]
         conditional_P = self._conditional_probabilities(perplexity)
         P = (conditional_P + conditional_P.T) / (2 * n_samples)    
 
         # Low-dimensional probability space
-        Q = (np.square(self.dY) + 1) ** -1
+        Q = 1 / (np.square(self.dY) + 1)
         np.fill_diagonal(Q, 0)
         Q /= Q.sum()
 
         # KL Divergence
-        log_P = np.log2(P, where=(P > 0))
-        log_Q = np.log2(Q, where=(Q > 0))
+        log_P = np.where(P > 0, np.log2(P), P)
+        log_Q = np.where(Q > 0, np.log2(Q), Q)
+
+        if np.any(log_P == -np.inf) or np.any(log_P == np.inf):
+            print("log_P has +inf or -inf")
+        if np.any(log_Q == -np.inf) or np.any(log_Q == np.inf):
+            print("log_Q has +inf or -inf")
+        if np.isnan(log_P).any():
+            print("log_P has NaN")
+        if np.isnan(log_Q).any():
+            print("log_Q has NaN")
+        if np.isnan(Q).any():
+            print("Q has NaN")
         kl_divergence = (P * (log_P - log_Q)).sum()
 
 
@@ -129,12 +166,10 @@ class Metrics():
         ----------
         perplexity : float
             Perplexity as described in Hinton and Roweis (2002) https://www.cs.toronto.edu/~hinton/absps/sne.pdf
-        scaling_factors : np.ndarray
-            factors by which to scale the low-dimensional space
         """
 
         # High-dimensional probability space
-        n_samples = self.X.shape[0]
+        n_samples = self.dX.shape[0]
         conditional_P = self._conditional_probabilities(perplexity)
         P = ((conditional_P + conditional_P.T) / (2 * n_samples))
 
@@ -145,8 +180,8 @@ class Metrics():
         Q_batch /= Q_batch.sum(axis=(1, 2), keepdims=True)
 
         # KL Divergence for all Y_batch
-        log_P = np.log2(P, where=(P > 0))
-        log_Q_batch = np.log2(Q_batch, where=(Q_batch > 0))
+        log_P = np.where(P > 0, np.log2(P), P)
+        log_Q_batch = np.where(Q_batch > 0, np.log2(Q_batch), Q_batch)
 
         kl_divergences = (P * (log_P - log_Q_batch)).sum(axis=(1, 2))
         return kl_divergences
@@ -163,7 +198,7 @@ class Metrics():
         perplexity : Perplexity as described in Hinton and Roweis (2002) https://www.cs.toronto.edu/~hinton/absps/sne.pdf
         steps : Number of steps for binary search for variances of Gaussian distributions
         """
-        n_samples = self.X.shape[0]
+        n_samples = self.dX.shape[0]
         desired_entropy = np.full((n_samples, 1), np.log2(perplexity))
         beta = np.ones((n_samples, 1)) # (2 * var_i ** 2) in the exponent of the Gaussian distribution
         beta_min = np.zeros((n_samples, 1), dtype=np.float64)
