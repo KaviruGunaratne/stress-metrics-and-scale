@@ -135,9 +135,7 @@ class Metrics():
         P = (conditional_P + conditional_P.T) / (2 * n_samples)    
 
         # Low-dimensional probability space
-        Q = 1 / (np.square(self.dY) + 1)
-        np.fill_diagonal(Q, 0)
-        Q /= Q.sum()
+        Q = self._get_Q(is_batch=False)
 
         # KL Divergence
         log_P = np.where(P > 0, np.log2(P), P)
@@ -174,10 +172,7 @@ class Metrics():
         P = ((conditional_P + conditional_P.T) / (2 * n_samples))
 
         # Compute low-dimensional probability space for all Y_batch
-        Q_batch = (np.square(self.dY_batch) + 1) ** -1
-        rows = np.arange(Q_batch.shape[1])
-        Q_batch[:, rows, rows] = 0 # Fill diagonal with 0
-        Q_batch /= Q_batch.sum(axis=(1, 2), keepdims=True)
+        Q_batch = self._get_Q(is_batch=True)
 
         # KL Divergence for all Y_batch
         log_P = np.where(P > 0, np.log2(P), P)
@@ -185,6 +180,28 @@ class Metrics():
 
         kl_divergences = (P * (log_P - log_Q_batch)).sum(axis=(1, 2))
         return kl_divergences
+    
+    def _get_Q(self, is_batch: bool):
+        """
+        Calculate the low dimensional probability distribution corresponding to Y
+        Parameters
+        ----------
+        is_batch : bool
+          If True, calculates probability distribution for all scales of embedding
+          If False, only calculates for scale = 1
+
+        """
+        if is_batch:
+            Q = (np.square(self.dY_batch) + 1) ** -1
+            rows = np.arange(Q.shape[1])
+            Q[:, rows, rows] = 0 # Fill diagonal with 0
+            Q /= Q.sum(axis=(1, 2), keepdims=True)
+        else:
+            Q = 1 / (np.square(self.dY) + 1)
+            np.fill_diagonal(Q, 0)
+            Q /= Q.sum()
+            
+        return Q
 
 
     def _conditional_probabilities(self, perplexity, steps=40):
