@@ -7,6 +7,7 @@ from scipy.optimize import minimize_scalar
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 import pandas as pd
+from sklearn.metrics import pairwise_distances
 
 from metrics import Metrics
 from metrics import MACHINE_EPSILON
@@ -252,7 +253,6 @@ def log_min_kl(perplexity, target_dir, target_csv_file, n_runs=10):
 
 
     min_kls.to_csv(f"{target_dir}/{target_csv_file}")
-    print(min_kls)
 
 
 def calculate_min_kl(X, Y, perplexity):
@@ -400,6 +400,65 @@ def kl_at_scale(perplexity, target_dir, target_csv_file, scales, n_runs):
 
     kls_at_scales.to_csv(f"{target_dir}/{target_csv_file}")
 
+def draw_shepard_diagrams(perplexity, target_dir, n_runs=10):
+    """
+    Plots the Shepard diagram between the high-dimensional and low-dimensional probability values à la t-SNE corresponding to each embedding.
+    The embeddings are considered at the default scale of 1.
+    Saves the diagrams at target_dir.
+
+    Parameters
+    ----------
+    perplexity : float
+      Perplexity to calculate the conditional probability distribution corresponding to the SNE algorithm 
+
+    target_dir : string
+      The directory where the diagrams will be stored
+
+    n_runs : int
+      Number of groups of embeddings (from t-SNE, UMAP, MDS, and Random) for each dataset whose diagrams are drawn
+    """
+
+    if not os.path.isdir(target_dir):
+        os.mkdir(target_dir)
+
+    datasets = os.listdir('datasets')
+    algorithms = ["RANDOM", "MDS", "UMAP", "TSNE"]
+
+    with tqdm.tqdm(total=len(datasets) * len(algorithms) * n_runs) as pbar:
+
+        for datasetStr in datasets:
+            datasetName = datasetStr.replace(".npy", "")
+            if "fashion_mnist" in datasetStr:
+                datasetName = "fashion_mnist"
+            X = np.load(f"datasets/{datasetName}.npy")
+
+            for n in range(n_runs):
+                pbar.set_postfix_str(f"Dataset={datasetName} (shape={X.shape}), Run={n}")
+
+                fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(16,16))
+
+                for ax, alg in zip(axes.flatten(), algorithms):
+                    Y = np.load(f"embeddings/{datasetName}_{alg}_{n}.npy")
+
+                    M = Metrics(X, Y, setbatch=False, precomputed=False, scaling_factors=None)
+                    conditional_P = M._conditional_probabilities(perplexity=perplexity)
+                    P = ((conditional_P + conditional_P.T) / (2 * conditional_P.shape[0]))
+                    Q = M._get_Q(is_batch=False)
+
+                    ax.scatter(P, Q, s=5, alpha=1.)
+                    ax.set_title(alg, fontweight='bold', fontsize='x-large')
+                    ax.set_ylabel("Low-Dimensional Probabilities Q")
+                    ax.set_xlabel("High-Dimensional Probabilities P")
+                    ax.tick_params(axis='x', rotation=45)
+
+                    pbar.update(1)
+
+                fig.subplots_adjust(hspace=0.3, wspace=0.5)
+                fig.suptitle(f'Shepard Diagrams of Probability Distributions for {datasetName.capitalize()} Dataset', fontweight='bold', fontsize='xx-large')
+                # plt.tight_layout()
+
+                fig.savefig(f"{target_dir}/Shepard_{datasetName}_{n}.png")
+                plt.close(fig)
 
 if __name__ == "__main__":
     compute_all_metrics()
