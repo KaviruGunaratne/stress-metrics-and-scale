@@ -96,19 +96,49 @@ def test_curve():
             #     json.dump(results,fdata,indent=4)
 
 
-def graph_kl(scales, target_dir, min_kl_data_file, n_runs=10):
+def graph_kl(scales, target_dir, n_runs=10, drop_UMAP=False, plot_min_kl=True, min_kl_data_file=None, plot_normalized_kl=False, normalized_kl_data_file=None):
     """
     Plot KL Divergence vs. scale graphs for each group of embeddings in embeddings/
-    Run log_min_kl first in order to draw the minimum points of the graphs.
+    If plotting minimum points (and points of KL Divergence where the embedding was normalized), log_min_kl (and log_normalized_kl) should be run first.
+
+
+    Parameters
+    ----------
+
+    scales : 1D array
+        The factors by which the embeddings are scaled before computing KL divergence
+
+    target_dir : string
+        The directory where the plotted graphs should be stored
+    
+    plot_min_kl : bool
+        If True, the minimum points are plotted
+        min_kl_data
+
+    n_runs : int
+        Number of sets of embeddings per dataset considered
+
+    drop_UMAP : bool
+        If True, only graphs of t-SNE, MDS, and Random embeddings are plotted
+        If False, graphs of UMAP embeddings are also plotted
+
+    min_kl_data_file : string
+        Name of CSV file in target_dir from where minimum points are accessed
+
+    plot_normalized_kl : bool
+        If True, coordinates of embedding-normalized KL divergence are plotted
+
+    normalized_kl_data_file : string
+        Name of CSV file in target_dir from where coordinates of embedding-normalized KL divergences are plotted
     """
-   
 
     if not os.path.isdir(target_dir):
         os.mkdir(target_dir)
 
-    datasets = os.listdir('datasets')
-    # datasets = ['orl.npy', 'har.npy', 'coil20.npy', 'cnae9.npy']
-    algorithms = ["RANDOM", "MDS", "UMAP", "TSNE"]
+    if drop_UMAP:
+        algorithms = ['RANDOM', 'MDS', 'TSNE']
+    else:
+        algorithms = ["RANDOM", "MDS", "UMAP", "TSNE"]
 
     # Load minimum point data
     min_kls = pd.read_csv(f'{target_dir}/{min_kl_data_file}', index_col=[0, 1, 2])
@@ -125,8 +155,12 @@ def graph_kl(scales, target_dir, min_kl_data_file, n_runs=10):
             for n in range(n_runs):
                 pbar.set_postfix_str(f"Dataset={datasetName} (shape={X.shape}), Run={n}")
 
-                fig = plt.figure(figsize=(20, 15))
-                gs = GridSpec(3, 4, figure=fig)
+                if drop_UMAP:
+                    fig = plt.figure(figsize=(15, 15))
+                    gs = GridSpec(3, 3, figure=fig)
+                else:
+                    fig = plt.figure(figsize=(20, 15))
+                    gs = GridSpec(3, 4, figure=fig)
                 graph_ax = fig.add_subplot(gs[0:2, :])
                 
                 for i, alg in enumerate(algorithms):
