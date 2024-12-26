@@ -96,7 +96,7 @@ def test_curve():
             #     json.dump(results,fdata,indent=4)
 
 
-def graph_kl(scales, target_dir, n_runs=10, drop_UMAP=False, plot_min_kl=True, min_kl_data_file=None, plot_normalized_kl=False, normalized_kl_data_file=None):
+def graph_kl(scales, target_dir, n_runs=10, drop_UMAP=False, plot_min_kl=True, min_kl_data_filepath=None, plot_normalized_kl=False, normalized_kl_data_filepath=None):
     """
     Plot KL Divergence vs. scale graphs for each group of embeddings in embeddings/
     If plotting minimum points (and points of KL Divergence where the embedding was normalized), log_min_kl (and log_normalized_kl) should be run first.
@@ -122,14 +122,14 @@ def graph_kl(scales, target_dir, n_runs=10, drop_UMAP=False, plot_min_kl=True, m
         If True, only graphs of t-SNE, MDS, and Random embeddings are plotted
         If False, graphs of UMAP embeddings are also plotted
 
-    min_kl_data_file : string
-        Name of CSV file in target_dir from where minimum points are accessed
+    min_kl_data_filepath : string
+        Path of CSV file in target_dir from where minimum points are accessed
 
     plot_normalized_kl : bool
         If True, coordinates of embedding-normalized KL divergence are plotted
 
-    normalized_kl_data_file : string
-        Name of CSV file in target_dir from where coordinates of embedding-normalized KL divergences are plotted
+    normalized_kl_data_filepath : string
+        Path of CSV file in target_dir from where coordinates of embedding-normalized KL divergences are plotted
     """
 
     if not os.path.isdir(target_dir):
@@ -141,7 +141,20 @@ def graph_kl(scales, target_dir, n_runs=10, drop_UMAP=False, plot_min_kl=True, m
         algorithms = ["RANDOM", "MDS", "UMAP", "TSNE"]
 
     # Load minimum point data
-    min_kls = pd.read_csv(f'{target_dir}/{min_kl_data_file}', index_col=[0, 1, 2])
+    if plot_min_kl:
+        min_kls = pd.read_csv(min_kl_data_filepath, index_col=[0, 1, 2])
+
+    # Load ZADU KL coordinates
+    if plot_normalized_kl:
+        normalized_kls = pd.read_csv(normalized_kl_data_filepath, index_col=[0, 1, 2])
+
+    # Colors of graphs for each algorithm
+    alg_color = {
+        'TSNE' : 'red',
+        'UMAP' : 'green',
+        'MDS' : 'orange',
+        'RANDOM' : 'blue',
+    }
     
 
     with tqdm.tqdm(total=len(datasets) * len(algorithms) * n_runs) as pbar:
@@ -169,12 +182,21 @@ def graph_kl(scales, target_dir, n_runs=10, drop_UMAP=False, plot_min_kl=True, m
                     kl_divergences = _compute_kl_divergences_in_chunks(X, Y, scales, perplexity=30)
 
                     # Plot kl vs. scale graph for alg
-                    graph_ax.plot(scales, kl_divergences, label=alg)
+                    graph_ax.plot(scales, kl_divergences, label=alg, c=alg_color[alg])
+                    
                     # Plot minimum point
-                    min_x = min_kls.loc[datasetName, f'Run {n}', 'x'][alg]
-                    min_y = min_kls.loc[datasetName, f'Run {n}', 'y'][alg]
-                    if min_x < scales[-1]:
-                        graph_ax.scatter(min_x, min_y, marker='X', label=f"{alg} Minimum")
+                    if plot_min_kl:
+                        min_x = min_kls.loc[datasetName, f'Run {n}', 'x'][alg]
+                        min_y = min_kls.loc[datasetName, f'Run {n}', 'y'][alg]
+                        if min_x < scales[-1]:
+                            graph_ax.scatter(min_x, min_y, marker='X', label=f"{alg} Minimum", c=alg_color[alg])
+                    
+                    # Plot point where embedding was normalized
+                    if plot_normalized_kl:
+                        normalized_x = normalized_kls.loc[datasetName, f'Run {n}', 'x'][alg]
+                        normalized_y = normalized_kls.loc[datasetName, f'Run {n}', 'y'][alg]
+                        if normalized_x < scales[-1]:
+                            graph_ax.scatter(normalized_x, normalized_y, marker='o', label=f"{alg} normalized", c=alg_color[alg])
                     
                     # Plot embedding
                     alg_ax = fig.add_subplot(gs[2, i])
@@ -499,5 +521,8 @@ if __name__ == "__main__":
     # test_curve()
     target_dir = 'test-kl-figures'
     min_kl_csv_file = 'min_kls_new.csv'
-    log_min_kl(perplexity=30, n_runs=7, target_dir=target_dir, target_csv_file=min_kl_csv_file)
-    graph_kl(scales=np.linspace(0, 15, 250), target_dir=target_dir, min_kl_data_file=min_kl_csv_file, n_runs=10)
+    log_min_kl(perplexity=30, n_runs=10, target_dir=target_dir, target_csv_file=min_kl_csv_file)
+    zadu_kl_csv_file = 'y_normalized_kls.csv'
+    log_normalized_kl(perplexity=30, target_dir=target_dir, target_csv_file=zadu_kl_csv_file, n_runs=10)
+    scales_to_graph = np.linspace(0, 15, 250)
+    graph_kl(scales=scales_to_graph, target_dir=target_dir, n_runs=2, drop_UMAP=False, min_kl_data_filepath=f'{target_dir}/{min_kl_csv_file}', plot_normalized_kl=True, normalized_kl_data_filepath=f'{target_dir}/{zadu_kl_csv_file}')
