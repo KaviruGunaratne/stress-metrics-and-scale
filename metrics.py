@@ -138,8 +138,10 @@ class Metrics():
         Q = self._get_Q(is_batch=False)
 
         # KL Divergence
-        log_P = np.where(P > 0, np.log2(P), P)
-        log_Q = np.where(Q > 0, np.log2(Q), Q)
+        log_P = np.zeros_like(P)
+        np.log2(P, out=log_P, where=P>0)
+        log_Q = np.zeros_like(Q)
+        np.log2(Q, out=log_Q, where=Q>0)
 
         if np.any(log_P == -np.inf) or np.any(log_P == np.inf):
             print("log_P has +inf or -inf")
@@ -175,8 +177,10 @@ class Metrics():
         Q_batch = self._get_Q(is_batch=True)
 
         # KL Divergence for all Y_batch
-        log_P = np.where(P > 0, np.log2(P), P)
-        log_Q_batch = np.where(Q_batch > 0, np.log2(Q_batch), Q_batch)
+        log_P = np.zeros_like(P)
+        np.log2(P, out=log_P, where=P>0)
+        log_Q_batch = np.zeros_like(Q_batch)
+        np.log2(Q_batch, out=log_Q_batch, where=Q_batch>0)
 
         kl_divergences = (P * (log_P - log_Q_batch)).sum(axis=(1, 2))
         return kl_divergences
