@@ -31,6 +31,11 @@ def loadEspadatoDatasets():
 
         name = qstr.replace("https://mespadoto.github.io/proj-quant-eval/data/", "").replace("/X.npy", "")
 
+        # The ORL dataset is currently not generated properly in the Espadoto code, and does not reflect the actual Olivetti faces dataset, so the resulting analyses are invalid.
+        # Therefore, this dataset is skipped in our analysis
+        if name == 'orl':
+            continue
+
         data = urllib.request.urlopen(qstr)
 
         # Write the raw binary data to file, so that Numpy can read it later
