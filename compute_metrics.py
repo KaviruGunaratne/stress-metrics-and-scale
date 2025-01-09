@@ -150,10 +150,17 @@ def graph_kl(scales, target_dir, n_runs=10, drop_UMAP=False, plot_min_kl=True, m
 
     # Colors of graphs for each algorithm
     alg_color = {
-        'TSNE' : 'red',
-        'UMAP' : 'green',
-        'MDS' : 'orange',
-        'RANDOM' : 'blue',
+        'TSNE' : 'darkblue',
+        'UMAP' : 'purple',
+        'MDS' : 'darkred',
+        'RANDOM' : 'darkgreen',
+    }
+
+    alg_name = {
+        'TSNE' : 't-SNE',
+        'UMAP' : 'UMAP',
+        'MDS' : 'MDS',
+        'RANDOM' : 'Random',
     }
     
 
@@ -164,15 +171,21 @@ def graph_kl(scales, target_dir, n_runs=10, drop_UMAP=False, plot_min_kl=True, m
             if "fashion_mnist" in datasetStr:
                 datasetName = "fashion_mnist"
             X = np.load(f"datasets/{datasetName}.npy")
+            labels = np.load(f"dataset_labels/{datasetName}.npy")
+            
+            # Larger scale for large datasets
+            if datasetName in ['epileptic', 'spambase', 's-curve', 'swissroll']:
+                orig_scales = scales
+                scales = np.linspace(0, 250, 300)
 
             for n in range(n_runs):
                 pbar.set_postfix_str(f"Dataset={datasetName} (shape={X.shape}), Run={n}")
 
                 if drop_UMAP:
-                    fig = plt.figure(figsize=(15, 15))
+                    fig = plt.figure(figsize=(45, 45))
                     gs = GridSpec(3, 3, figure=fig)
                 else:
-                    fig = plt.figure(figsize=(20, 15))
+                    fig = plt.figure(figsize=(60, 45))
                     gs = GridSpec(3, 4, figure=fig)
                 graph_ax = fig.add_subplot(gs[0:2, :])
                 
@@ -182,14 +195,14 @@ def graph_kl(scales, target_dir, n_runs=10, drop_UMAP=False, plot_min_kl=True, m
                     kl_divergences = _compute_kl_divergences_in_chunks(X, Y, scales, perplexity=30)
 
                     # Plot kl vs. scale graph for alg
-                    graph_ax.plot(scales, kl_divergences, label=alg, c=alg_color[alg])
+                    graph_ax.plot(scales, kl_divergences, label=alg_name[alg], c=alg_color[alg])
                     
                     # Plot minimum point
                     if plot_min_kl:
                         min_x = min_kls.loc[datasetName, f'Run {n}', 'x'][alg]
                         min_y = min_kls.loc[datasetName, f'Run {n}', 'y'][alg]
                         if min_x < scales[-1]:
-                            graph_ax.scatter(min_x, min_y, marker='X', label=f"{alg} Minimum", c=alg_color[alg])
+                            graph_ax.scatter(min_x, min_y, marker='o', label=f"Minimum", c=alg_color[alg])
                     
                     # Plot point where embedding was normalized
                     if plot_normalized_kl:
@@ -200,24 +213,31 @@ def graph_kl(scales, target_dir, n_runs=10, drop_UMAP=False, plot_min_kl=True, m
                     
                     # Plot embedding
                     alg_ax = fig.add_subplot(gs[2, i])
-                    alg_ax.scatter(Y[:, 0], Y[:, 1], color='black', s=10, alpha=0.2)
-                    alg_ax.set_title(f"{alg} Embedding")
+                    alg_ax.scatter(Y[:, 0], Y[:, 1], s=30, alpha=0.7, c=labels, cmap='tab20', edgecolors='black')
+                    alg_ax.set_title(f"{datasetName.capitalize} dataset embedded with {alg_name[alg]}", fontdict={'fontsize': 80})
+                    alg_ax.set_xticks([])
+                    alg_ax.set_yticks([])
 
                     pbar.update(1)
 
-                graph_ax.set_title("KL Divergence w.r.t. Scale", fontdict={'fontsize': 22})
-                graph_ax.set_xlabel("Scaling Factor", fontdict={'fontsize': 17})
-                graph_ax.set_ylabel("KL Divergence", fontdict={'fontsize': 17})
-                graph_ax.legend()
-                graph_ax.grid(True)
+                graph_ax.set_title(datasetName.capitalize(), fontdict={'fontsize': 120})
+                graph_ax.set_xlabel("Scale value", fontdict={'fontsize': 100})
+                graph_ax.set_ylabel("KL Divergence", fontdict={'fontsize': 100})
+                graph_ax.legend(fontsize=40)
+                graph_ax.tick_params(axis='x', labelsize=80)
+                graph_ax.tick_params(axis='y', labelsize=80)
+                # graph_ax.grid(True)
 
                 fig.subplots_adjust(hspace=0.5)
-                fig.suptitle(f'Variation of KL Divergence with scale for {datasetName.capitalize()} Dataset', fontweight='bold')
+                fig.suptitle(f'Variation of KL Divergence with scale for {datasetName.capitalize()} Dataset', fontweight='bold', fontsize=120)
                 # plt.tight_layout()
 
                 fig.savefig(f"{target_dir}/{datasetName}_{n}.png")
                 plt.close(fig)
 
+            # Reset scale to original
+            if datasetName in ['epileptic', 'spambase', 's-curve', 'swissroll']:
+                scales = orig_scales
 
 
 def __estimate_needed_memory(X, scales):

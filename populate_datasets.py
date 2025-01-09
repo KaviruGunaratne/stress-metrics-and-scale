@@ -8,6 +8,9 @@ import urllib.request
 import os
 if not os.path.isdir("datasets"):
     os.mkdir("datasets")
+labels_path = "dataset_labels"
+if not os.path.isdir(labels_path):
+    os.mkdir(labels_path)
 
 
 def loadEspadatoDatasets():
@@ -35,14 +38,21 @@ def loadEspadatoDatasets():
         # Therefore, this dataset is skipped in our analysis
         if name == 'orl':
             continue
-
+        
+        # The dataset itself
         data = urllib.request.urlopen(qstr)
+        # The labels of the dataset
+        labels = urllib.request.urlopen(qstr.replace("X.npy", "y.npy"))
 
-        # Write the raw binary data to file, so that Numpy can read it later
+        # Write the raw binary data of the dataset to a .npy file
         with open(f'datasets/{name}.npy', 'wb') as fdata:
             for line in data:
                 fdata.write(line)
-
+        
+        # Write the label data to a .npy file
+        with open(f'{labels_path}/{name}.npy', 'wb') as fdata:
+            for line in labels:
+                fdata.write(line)
 
 def loadSmallDatasets():
     """
@@ -54,16 +64,22 @@ def loadSmallDatasets():
     # Load iris dataset
     data = datasets.load_iris()
     df = pd.DataFrame(data.data)
+    df['target'] = data.target
     df.drop_duplicates(inplace=True)
-    np.save("datasets/iris.npy", df.to_numpy())
+    X = df[[0, 1, 2, 3]].to_numpy()
+    np.save("datasets/iris.npy", X)
+    labels = df["target"].to_numpy()
+    np.save(f"{labels_path}/iris.npy", labels)
 
     # Load wine dataset
     data = datasets.load_wine()
     np.save("datasets/wine.npy", data.data)
+    np.save(f"{labels_path}/wine.npy", data.target)
 
     # Load swiss roll dataset
-    X, _ = datasets.make_swiss_roll(n_samples=1500)
+    X, t = datasets.make_swiss_roll(n_samples=1500)
     np.save("datasets/swissroll.npy", X)
+    np.save(f"{labels_path}/swissroll.npy", t)
 
     # Load penguins dataset
     data = sns.load_dataset('penguins').dropna(thresh=6)
@@ -71,6 +87,9 @@ def loadSmallDatasets():
                 'flipper_length_mm', 'body_mass_g']
     X = data[cols_num]
     np.save("datasets/penguins.npy", X)
+    species_mapping = {species: idx for idx, species in enumerate(data['species'].unique())}
+    labels = data['species'].map(species_mapping).to_numpy()
+    np.save(f"{labels_path}/penguins.npy", labels)
 
     # Load auto-mpg dataset
     url = 'https://archive.ics.uci.edu/ml/machine-learning-databases/auto-mpg/auto-mpg.data'
@@ -82,11 +101,14 @@ def loadSmallDatasets():
     data = data[data.horsepower.notnull()]
     X = data[['acceleration', 'cylinders',
                 'displacement', 'horsepower', 'weight']]
+    labels = data['mpg'].to_numpy()
     np.save("datasets/auto-mpg.npy", X)
+    np.save(f"{labels_path}/auto-mpg.npy", labels)
 
     # Load s-curve dataset
-    X, _ = datasets.make_s_curve(n_samples=1500)
+    X, t = datasets.make_s_curve(n_samples=1500)
     np.save("datasets/s-curve.npy", X)
+    np.save(f"{labels_path}/s-curve.npy", t)
 
 
 if __name__ == "__main__":
