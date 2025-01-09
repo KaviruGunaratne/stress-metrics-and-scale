@@ -185,6 +185,37 @@ class Metrics():
         kl_divergences = (P * (log_P - log_Q_batch)).sum(axis=(1, 2))
         return kl_divergences
     
+    def compute_kl_divergence_at_infty(self, perplexity):
+        """
+        Compute the KL Divergence between probability distributions of X and Y à la t-SNE at infinite scale of the embedding
+
+        Parameters
+        ----------
+        perplexity : float
+            Perplexity as described in Hinton and Roweis (2002) https://www.cs.toronto.edu/~hinton/absps/sne.pdf
+        """
+
+        # High dimensional probability space
+        n_samples = self.dX.shape[0]
+        conditional_P = self._conditional_probabilities(perplexity)
+        P = ((conditional_P + conditional_P.T) / (2 * n_samples))
+
+        # Low dimensional probability space
+        Q = np.zeros_like(self.dY)
+        Q[self.dY != 0] = self.dY[self.dY != 0] ** -2
+        np.fill_diagonal(Q, 0)
+        Q /= Q.sum()
+
+        # KL Divergence
+        log_P = np.zeros_like(P)
+        np.log2(P, out=log_P, where=P>0)
+        log_Q = np.zeros_like(Q)
+        np.log2(Q, out=log_Q, where=Q>0)
+        
+        kl_divergence = (P * (log_P - log_Q)).sum()
+
+        return kl_divergence
+    
     def _get_Q(self, is_batch: bool):
         """
         Calculate the low dimensional probability distribution corresponding to Y
