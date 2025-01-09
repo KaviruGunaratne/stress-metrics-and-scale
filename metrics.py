@@ -121,7 +121,7 @@ class Metrics():
         shepardCorr = spearman_rho.measure(self.X,self.Y,(self.dX,self.dY))
         return shepardCorr['spearman_rho']
     
-    def compute_kl_divergence(self, perplexity=30):
+    def compute_kl_divergence(self, perplexity=30, y_similarity='t'):
         """
         Compute joint probability distributions of X and Y à la t-SNE and compute the KL divergence between them
 
@@ -135,7 +135,7 @@ class Metrics():
         P = (conditional_P + conditional_P.T) / (2 * n_samples)    
 
         # Low-dimensional probability space
-        Q = self._get_Q(is_batch=False)
+        Q = self._get_Q(is_batch=False, similarity=y_similarity)
 
         # KL Divergence
         log_P = np.zeros_like(P)
@@ -158,7 +158,7 @@ class Metrics():
 
         return kl_divergence
     
-    def compute_kl_divergences(self, perplexity):
+    def compute_kl_divergences(self, perplexity, y_similarity='t'):
         """
         Compute joint probability distributions of X and Y à la t-SNE and compute the KL divergence between them
 
@@ -174,7 +174,7 @@ class Metrics():
         P = ((conditional_P + conditional_P.T) / (2 * n_samples))
 
         # Compute low-dimensional probability space for all Y_batch
-        Q_batch = self._get_Q(is_batch=True)
+        Q_batch = self._get_Q(is_batch=True, similarity=y_similarity)
 
         # KL Divergence for all Y_batch
         log_P = np.zeros_like(P)
@@ -216,7 +216,7 @@ class Metrics():
 
         return kl_divergence
     
-    def _get_Q(self, is_batch: bool):
+    def _get_Q(self, is_batch: bool, similarity='t'):
         """
         Calculate the low dimensional probability distribution corresponding to Y
         Parameters
@@ -224,18 +224,34 @@ class Metrics():
         is_batch : bool
           If True, calculates probability distribution for all scales of embedding
           If False, only calculates for scale = 1
-
+        
+        similarity : str
+          't' -> The Student's t-distribution is used (like in t-SNE)
+          'normal' -> The normal distribution is used (like in SNE)
         """
-        if is_batch:
-            Q = (np.square(self.dY_batch) + 1) ** -1
-            rows = np.arange(Q.shape[1])
-            Q[:, rows, rows] = 0 # Fill diagonal with 0
-            Q /= Q.sum(axis=(1, 2), keepdims=True)
+
+        if similarity == 't':
+            if is_batch:
+                Q = (np.square(self.dY_batch) + 1) ** -1
+                rows = np.arange(Q.shape[1])
+                Q[:, rows, rows] = 0 # Fill diagonal with 0
+                Q /= Q.sum(axis=(1, 2), keepdims=True)
+            else:
+                Q = 1 / (np.square(self.dY) + 1)
+                np.fill_diagonal(Q, 0)
+                Q /= Q.sum()
+        elif similarity == 'normal':
+            if is_batch:
+                Q = np.exp(-1 * np.square(self.dX))
+                rows = np.arange(Q.shape[1])
+                Q[:, rows, rows] = 0 # Fill diagonal with 0
+                Q /= Q.sum(axis=(1, 2), keepdims=True)
+            else:
+                Q = np.exp(-1 * np.square(self.dY))
+                np.fill_diagonal(Q, 0)
+                Q /= Q.sum()
         else:
-            Q = 1 / (np.square(self.dY) + 1)
-            np.fill_diagonal(Q, 0)
-            Q /= Q.sum()
-            
+            raise ValueError(f"Invalid string: '{similarity}' is not a valid value for the parameter 'similarity'")
         return Q
 
 

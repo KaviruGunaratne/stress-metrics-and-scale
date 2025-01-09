@@ -331,13 +331,13 @@ def log_min_kl(perplexity, target_dir, target_csv_file, n_runs=10):
     min_kls.to_csv(f"{target_dir}/{target_csv_file}")
 
 
-def calculate_min_kl(X, Y, perplexity):
+def calculate_min_kl(X, Y, perplexity, y_similarity='t'):
     """
     Use minimize_scalar in Scipy.optimize to find the inimizing coordinates of KL Divergence w.r.t. scale.
     """
     def get_kl(scale):
         M = Metrics(X, Y * scale, scaling_factors=np.empty(0))
-        return M.compute_kl_divergence(perplexity=perplexity)
+        return M.compute_kl_divergence(perplexity=perplexity, y_similarity=y_similarity)
     
     res = minimize_scalar(get_kl, bounds=(0, 300))
     return (res.x, res.fun)
