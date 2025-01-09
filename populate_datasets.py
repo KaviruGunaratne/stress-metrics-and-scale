@@ -74,7 +74,7 @@ def loadSmallDatasets():
 
     # Load auto-mpg dataset
     url = 'https://archive.ics.uci.edu/ml/machine-learning-databases/auto-mpg/auto-mpg.data'
-    data = pd.read_csv(url, delim_whitespace=True)
+    data = pd.read_csv(url, delim_whitespace=True, header=None)
     data.columns = ['mpg', 'cylinders', 'displacement', 'horsepower',
                     'weight', 'acceleration', 'model_year', 'origin', 'car_name']
     data.horsepower = pd.to_numeric(data.horsepower, errors='coerce')
