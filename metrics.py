@@ -132,28 +132,13 @@ class Metrics():
         # High-dimensional probability space
         n_samples = self.dX.shape[0]
         conditional_P = self._conditional_probabilities(perplexity)
-        P = (conditional_P + conditional_P.T) / (2 * n_samples)    
+        P = (conditional_P + conditional_P.T) / (2 * n_samples)
+        P = np.maximum(P, MACHINE_EPSILON)
 
         # Low-dimensional probability space
         Q = self._get_Q(is_batch=False, similarity=y_similarity)
 
-        # KL Divergence
-        log_P = np.zeros_like(P)
-        np.log2(P, out=log_P, where=P>0)
-        log_Q = np.zeros_like(Q)
-        np.log2(Q, out=log_Q, where=Q>0)
-
-        if np.any(log_P == -np.inf) or np.any(log_P == np.inf):
-            print("log_P has +inf or -inf")
-        if np.any(log_Q == -np.inf) or np.any(log_Q == np.inf):
-            print("log_Q has +inf or -inf")
-        if np.isnan(log_P).any():
-            print("log_P has NaN")
-        if np.isnan(log_Q).any():
-            print("log_Q has NaN")
-        if np.isnan(Q).any():
-            print("Q has NaN")
-        kl_divergence = (P * (log_P - log_Q)).sum()
+        kl_divergence = (P * np.log(P / Q)).sum()
 
 
         return kl_divergence
@@ -172,17 +157,12 @@ class Metrics():
         n_samples = self.dX.shape[0]
         conditional_P = self._conditional_probabilities(perplexity)
         P = ((conditional_P + conditional_P.T) / (2 * n_samples))
+        P = np.maximum(P, MACHINE_EPSILON)
 
         # Compute low-dimensional probability space for all Y_batch
         Q_batch = self._get_Q(is_batch=True, similarity=y_similarity)
 
-        # KL Divergence for all Y_batch
-        log_P = np.zeros_like(P)
-        np.log2(P, out=log_P, where=P>0)
-        log_Q_batch = np.zeros_like(Q_batch)
-        np.log2(Q_batch, out=log_Q_batch, where=Q_batch>0)
-
-        kl_divergences = (P * (log_P - log_Q_batch)).sum(axis=(1, 2))
+        kl_divergences = (P * np.log(P / Q_batch)).sum(axis=(1, 2))
         return kl_divergences
     
     def compute_kl_divergence_at_infty(self, perplexity):
@@ -195,24 +175,21 @@ class Metrics():
             Perplexity as described in Hinton and Roweis (2002) https://www.cs.toronto.edu/~hinton/absps/sne.pdf
         """
 
-        # High dimensional probability space
+        # High-dimensional probability space
         n_samples = self.dX.shape[0]
         conditional_P = self._conditional_probabilities(perplexity)
-        P = ((conditional_P + conditional_P.T) / (2 * n_samples))
+        P = (conditional_P + conditional_P.T) / (2 * n_samples)
+        P = np.maximum(P, MACHINE_EPSILON)
 
         # Low dimensional probability space
         Q = np.zeros_like(self.dY)
         Q[self.dY != 0] = self.dY[self.dY != 0] ** -2
         np.fill_diagonal(Q, 0)
         Q /= Q.sum()
+        Q = np.maximum(Q, MACHINE_EPSILON)
 
         # KL Divergence
-        log_P = np.zeros_like(P)
-        np.log2(P, out=log_P, where=P>0)
-        log_Q = np.zeros_like(Q)
-        np.log2(Q, out=log_Q, where=Q>0)
-        
-        kl_divergence = (P * (log_P - log_Q)).sum()
+        kl_divergence = (P * np.log(P / Q)).sum()
 
         return kl_divergence
     
@@ -231,27 +208,30 @@ class Metrics():
         """
 
         if similarity == 't':
-            if is_batch:
-                Q = (np.square(self.dY_batch) + 1) ** -1
-                rows = np.arange(Q.shape[1])
-                Q[:, rows, rows] = 0 # Fill diagonal with 0
-                Q /= Q.sum(axis=(1, 2), keepdims=True)
-            else:
-                Q = 1 / (np.square(self.dY) + 1)
-                np.fill_diagonal(Q, 0)
-                Q /= Q.sum()
+                if is_batch:
+                    Q = (np.square(self.dY_batch) + 1) ** -1
+                else:
+                    Q = (np.square(self.dY) + 1) ** -1
         elif similarity == 'normal':
-            if is_batch:
-                Q = np.exp(-1 * np.square(self.dX))
-                rows = np.arange(Q.shape[1])
-                Q[:, rows, rows] = 0 # Fill diagonal with 0
-                Q /= Q.sum(axis=(1, 2), keepdims=True)
-            else:
-                Q = np.exp(-1 * np.square(self.dY))
-                np.fill_diagonal(Q, 0)
-                Q /= Q.sum()
+                if is_batch:
+                    Q = np.exp(-1 * np.square(self.dY_batch))
+                else:
+                    Q = np.exp(-1 * np.square(self.dY))
         else:
             raise ValueError(f"Invalid string: '{similarity}' is not a valid value for the parameter 'similarity'")
+
+        Q = np.maximum(Q, MACHINE_EPSILON)
+
+        if is_batch:
+            rows = np.arange(Q.shape[1])
+            Q[:, rows, rows] = 0 # Fill diagonal with 0
+            Q /= Q.sum(axis=(1, 2), keepdims=True)
+        else:
+            np.fill_diagonal(Q, 0)
+            Q /= Q.sum()
+
+        Q = np.maximum(Q, MACHINE_EPSILON)
+
         return Q
 
 
@@ -280,9 +260,11 @@ class Metrics():
             P = P / row_sums
 
             # Calculate entropy
-            entropy = -1 * (P * np.log2(P, where=(P > MACHINE_EPSILON))).sum(axis=1, keepdims=True)
+            log_P = np.zeros_like(P)
+            np.log(np.maximum(P, MACHINE_EPSILON), out=log_P, where=P>0)
+            entropy = -1 * (P * log_P).sum(axis=1, keepdims=True)
             entropy_diff = entropy - desired_entropy
-    
+
 
             # Stop if variances sufficiently match perplexity
             if np.all(np.abs(entropy_diff) < 1e-5):
