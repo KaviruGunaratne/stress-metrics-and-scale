@@ -235,7 +235,7 @@ class Metrics():
         return Q
 
 
-    def _conditional_probabilities(self, perplexity, steps=40):
+    def _conditional_probabilities(self, perplexity, steps=100):
         """
         Calculate conditional probability matrix P corresponding to SNE algorithm
         
@@ -247,7 +247,7 @@ class Metrics():
         steps : Number of steps for binary search for variances of Gaussian distributions
         """
         n_samples = self.dX.shape[0]
-        desired_entropy = np.full((n_samples, 1), np.log2(perplexity))
+        desired_entropy = np.full((n_samples, 1), np.log(perplexity))
         beta = np.ones((n_samples, 1)) # (2 * var_i ** 2) in the exponent of the Gaussian distribution
         beta_min = np.zeros((n_samples, 1), dtype=np.float64)
         beta_max = np.full((n_samples, 1), np.inf)
@@ -255,7 +255,7 @@ class Metrics():
         # Binary Search
         for _ in range(steps):
             # Create conditional probability distributions
-            P = np.where(self.dX != 0, np.exp(-1 * np.square(self.dX) / beta), 0)
+            P = np.exp(-1 * np.square(self.dX) / beta)
             row_sums = np.maximum(P.sum(axis=1, keepdims=True), MACHINE_EPSILON)
             P = P / row_sums
 
