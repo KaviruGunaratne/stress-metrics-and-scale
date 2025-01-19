@@ -577,7 +577,7 @@ def log_min_kl_normal(perplexity, target_dir, target_csv_file, n_runs=10):
 
 
 
-def draw_shepard_diagrams(perplexity, target_dir, n_runs=10):
+def draw_shepard_diagrams(perplexity, target_dir, n_runs=10, granularity=10):
     """
     Plots the Shepard diagram between the high-dimensional and low-dimensional probability values à la t-SNE corresponding to each embedding.
     The embeddings are considered at the default scale of 1.
@@ -593,6 +593,9 @@ def draw_shepard_diagrams(perplexity, target_dir, n_runs=10):
 
     n_runs : int
       Number of groups of embeddings (from t-SNE, UMAP, MDS, and Random) for each dataset whose diagrams are drawn
+
+    granularity : int
+        Determines granularity of mean-value graph in the Shepard diagram
     """
 
     if not os.path.isdir(target_dir):
@@ -619,14 +622,24 @@ def draw_shepard_diagrams(perplexity, target_dir, n_runs=10):
 
                     M = Metrics(X, Y, setbatch=False, precomputed=False, scaling_factors=None)
                     conditional_P = M._conditional_probabilities(perplexity=perplexity)
-                    P = ((conditional_P + conditional_P.T) / (2 * conditional_P.shape[0]))
-                    Q = M._get_Q(is_batch=False)
+                    P = ((conditional_P + conditional_P.T) / (2 * conditional_P.shape[0])).flatten()
+                    Q = M._get_Q(is_batch=False).flatten()
 
+                    # Plot Shepard diagram
                     ax.scatter(P, Q, s=5, alpha=1.)
                     ax.set_title(alg, fontweight='bold', fontsize='x-large')
                     ax.set_ylabel("Low-Dimensional Probabilities Q")
                     ax.set_xlabel("High-Dimensional Probabilities P")
                     ax.tick_params(axis='x', rotation=45)
+
+                    # Plot mean graph
+                    p_intervals = np.linspace(np.min(P), np.max(P), granularity)
+                    Q_in_intervals = [Q[(low_lim < P) & (P <= up_lim)] for low_lim, up_lim in zip(p_intervals, p_intervals[1:])]
+                    interval_is_nonempty = np.array([(Q_vals.size != 0) for Q_vals in Q_in_intervals])
+                    p_intervals = p_intervals[:-1][interval_is_nonempty]
+                    mean_q_values = np.array([Q_vals.mean() for Q_vals in Q_in_intervals if not (Q_vals.size == 0)])
+
+                    ax.plot(p_intervals, mean_q_values, c='red', linewidth=3.)
 
                     pbar.update(1)
 
