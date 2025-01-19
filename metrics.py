@@ -5,8 +5,6 @@ import zadu
 
 MACHINE_EPSILON = np.finfo(np.float64).eps
 
-#TODO: Add check that no two points are too close; if they are, add small random noise
-
 class Metrics():
     """
     Class for computing various stress metrics between high-dimensional and low-dimensional data.
@@ -133,14 +131,13 @@ class Metrics():
         n_samples = self.dX.shape[0]
         conditional_P = self._conditional_probabilities(perplexity)
         P = (conditional_P + conditional_P.T) / (2 * n_samples)
-        P = np.maximum(P, MACHINE_EPSILON)
+        P = np.maximum(P, 1e-15)
 
         # Low-dimensional probability space
         Q = self._get_Q(is_batch=False, similarity=y_similarity)
 
+        # KL Divergence
         kl_divergence = (P * np.log(P / Q)).sum()
-
-
         return kl_divergence
     
     def compute_kl_divergences(self, perplexity, y_similarity='t'):
@@ -156,12 +153,13 @@ class Metrics():
         # High-dimensional probability space
         n_samples = self.dX.shape[0]
         conditional_P = self._conditional_probabilities(perplexity)
-        P = ((conditional_P + conditional_P.T) / (2 * n_samples))
-        P = np.maximum(P, MACHINE_EPSILON)
+        P = (conditional_P + conditional_P.T) / (2 * n_samples)
+        P = np.maximum(P, 1e-15)
 
-        # Compute low-dimensional probability space for all Y_batch
+        # Low-dimensional probability space for all Y_batch
         Q_batch = self._get_Q(is_batch=True, similarity=y_similarity)
 
+        # KL Divergence
         kl_divergences = (P * np.log(P / Q_batch)).sum(axis=(1, 2))
         return kl_divergences
     
@@ -179,14 +177,13 @@ class Metrics():
         n_samples = self.dX.shape[0]
         conditional_P = self._conditional_probabilities(perplexity)
         P = (conditional_P + conditional_P.T) / (2 * n_samples)
-        P = np.maximum(P, MACHINE_EPSILON)
+        P = np.maximum(P, 1e-15)
 
         # Low dimensional probability space
-        Q = np.zeros_like(self.dY)
-        Q[self.dY != 0] = self.dY[self.dY != 0] ** -2
+        Q = np.maximum(self.dY, MACHINE_EPSILON) ** -2
         np.fill_diagonal(Q, 0)
         Q /= Q.sum()
-        Q = np.maximum(Q, MACHINE_EPSILON)
+        Q = np.maximum(Q, 1e-15)
 
         # KL Divergence
         kl_divergence = (P * np.log(P / Q)).sum()
@@ -208,19 +205,19 @@ class Metrics():
         """
 
         if similarity == 't':
-                if is_batch:
-                    Q = (np.square(self.dY_batch) + 1) ** -1
-                else:
-                    Q = (np.square(self.dY) + 1) ** -1
+            if is_batch:
+                Q = (np.square(self.dY_batch) + 1.0) ** -1
+            else:
+                Q = (np.square(self.dY) + 1.0) ** -1
         elif similarity == 'normal':
-                if is_batch:
-                    Q = np.exp(-1 * np.square(self.dY_batch))
-                else:
-                    Q = np.exp(-1 * np.square(self.dY))
+            if is_batch:
+                Q = np.exp(-1 * np.square(self.dY_batch))
+            else:
+                Q = np.exp(-1 * np.square(self.dY))
+            Q = np.maximum(Q, MACHINE_EPSILON)
         else:
             raise ValueError(f"Invalid string: '{similarity}' is not a valid value for the parameter 'similarity'")
 
-        Q = np.maximum(Q, MACHINE_EPSILON)
 
         if is_batch:
             rows = np.arange(Q.shape[1])
@@ -230,7 +227,7 @@ class Metrics():
             np.fill_diagonal(Q, 0)
             Q /= Q.sum()
 
-        Q = np.maximum(Q, MACHINE_EPSILON)
+        Q = np.maximum(Q, 1e-15)
 
         return Q
 
@@ -256,12 +253,14 @@ class Metrics():
         for _ in range(steps):
             # Create conditional probability distributions
             P = np.exp(-1 * np.square(self.dX) / beta)
-            row_sums = np.maximum(P.sum(axis=1, keepdims=True), MACHINE_EPSILON)
+            np.fill_diagonal(P, 0)
+            row_sums = P.sum(axis=1, keepdims=True)
+            row_sums[row_sums == 0] = 1e-8
             P = P / row_sums
+            P = np.maximum(P, 1e-15)
 
             # Calculate entropy
-            log_P = np.zeros_like(P)
-            np.log(np.maximum(P, MACHINE_EPSILON), out=log_P, where=P>0)
+            log_P = np.log(P)
             entropy = -1 * (P * log_P).sum(axis=1, keepdims=True)
             entropy_diff = entropy - desired_entropy
 
