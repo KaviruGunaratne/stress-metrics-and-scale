@@ -1,0 +1,9 @@
+name: dr-metrics
+channels:
+  - conda-forge
+dependencies:
+  - python==3.12
+  - anaconda
+  - pip
+  - pip:
+    - -r requirements.txt
