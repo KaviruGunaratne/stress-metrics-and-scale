@@ -2,6 +2,7 @@
 import numpy as np 
 from sklearn.metrics import pairwise_distances
 import zadu
+from scipy.special import logsumexp
 
 MACHINE_EPSILON = np.finfo(np.float64).eps
 
@@ -195,30 +196,57 @@ class Metrics():
           't' -> The Student's t-distribution is used (like in t-SNE)
           'normal' -> The normal distribution is used (like in SNE)
         """
+        # # Fill Q
+        # if similarity == 't':
+        #     if is_batch:
+        #         Q = (np.square(self.dY_batch) + 1.0) ** -1
+        #     else:
+        #         Q = (np.square(self.dY) + 1.0) ** -1
+        # elif similarity == 'normal':
+        #     if is_batch:
+        #         Q = np.exp(-1 * np.square(self.dY_batch))
+        #     else:
+        #         Q = np.exp(-1 * np.square(self.dY))
+        #     Q = np.maximum(Q, MACHINE_EPSILON)
+        # else:
+        #     raise ValueError(f"Invalid string: '{similarity}' is not a valid value for the parameter 'similarity'")
+
+        # # Fill diagonal with 0
+        # if is_batch:
+        #     rows = np.arange(Q.shape[1])
+        #     Q[:, rows, rows] = 0 # Fill diagonal with 0
+        #     Q /= Q.sum(axis=(1, 2), keepdims=True)
+        # else:
+        #     np.fill_diagonal(Q, 0)
+        #     Q /= Q.sum()
+
+        # Q = np.maximum(Q, 1e-15)
 
         if similarity == 't':
             if is_batch:
                 Q = (np.square(self.dY_batch) + 1.0) ** -1
+                rows = np.arange(Q.shape[1])
+                Q[:, rows, rows] = 0 # Fill diagonal with 0
+                Q /= Q.sum(axis=(1, 2), keepdims=True)
             else:
                 Q = (np.square(self.dY) + 1.0) ** -1
+                np.fill_diagonal(Q, 0)
+                Q /= Q.sum()
+        
         elif similarity == 'normal':
             if is_batch:
-                Q = np.exp(-1 * np.square(self.dY_batch))
+                negsq_dist = -np.square(self.dY_batch)
+                rows = np.arange(negsq_dist.shape[1])
+                negsq_dist[:, rows, rows] = -np.inf # Fill diagonal with -inf (since exp(-inf) == 0)
+                Q = np.exp(negsq_dist - logsumexp(negsq_dist, axis=(1,2), keepdims=True))
             else:
-                Q = np.exp(-1 * np.square(self.dY))
-            Q = np.maximum(Q, MACHINE_EPSILON)
+                negsq_dist = -np.square(self.dY)
+                np.fill_diagonal(negsq_dist, -np.inf) # Fill diagonal with -inf (since exp(-inf) == 0)
+                Q = np.exp(negsq_dist - logsumexp(negsq_dist, keepdims=True))
         else:
             raise ValueError(f"Invalid string: '{similarity}' is not a valid value for the parameter 'similarity'")
-
-
-        if is_batch:
-            rows = np.arange(Q.shape[1])
-            Q[:, rows, rows] = 0 # Fill diagonal with 0
-            Q /= Q.sum(axis=(1, 2), keepdims=True)
-        else:
-            np.fill_diagonal(Q, 0)
-            Q /= Q.sum()
-
+            
+        # To prevent zero division error
         Q = np.maximum(Q, 1e-15)
 
         return Q
