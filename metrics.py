@@ -128,10 +128,7 @@ class Metrics():
         perplexity : Perplexity as described in Hinton and Roweis (2002) https://www.cs.toronto.edu/~hinton/absps/sne.pdf
         """
         # High-dimensional probability space
-        n_samples = self.dX.shape[0]
-        conditional_P = self._conditional_probabilities(perplexity)
-        P = (conditional_P + conditional_P.T) / (2 * n_samples)
-        P = np.maximum(P, 1e-15)
+        P = self._joint_probabilities(perplexity)
 
         # Low-dimensional probability space
         Q = self._get_Q(is_batch=False, similarity=y_similarity)
@@ -151,10 +148,7 @@ class Metrics():
         """
 
         # High-dimensional probability space
-        n_samples = self.dX.shape[0]
-        conditional_P = self._conditional_probabilities(perplexity)
-        P = (conditional_P + conditional_P.T) / (2 * n_samples)
-        P = np.maximum(P, 1e-15)
+        P = self._joint_probabilities(perplexity)
 
         # Low-dimensional probability space for all Y_batch
         Q_batch = self._get_Q(is_batch=True, similarity=y_similarity)
@@ -162,6 +156,7 @@ class Metrics():
         # KL Divergence
         kl_divergences = (P * np.log(P / Q_batch)).sum(axis=(1, 2))
         return kl_divergences
+
     
     def compute_kl_divergence_at_infty(self, perplexity):
         """
@@ -174,10 +169,7 @@ class Metrics():
         """
 
         # High-dimensional probability space
-        n_samples = self.dX.shape[0]
-        conditional_P = self._conditional_probabilities(perplexity)
-        P = (conditional_P + conditional_P.T) / (2 * n_samples)
-        P = np.maximum(P, 1e-15)
+        P = self._joint_probabilities(perplexity)
 
         # Low dimensional probability space
         Q = np.maximum(self.dY, MACHINE_EPSILON) ** -2
@@ -231,6 +223,12 @@ class Metrics():
 
         return Q
 
+    def _joint_probabilities(self, perplexity):
+        n_samples = self.dX.shape[0]
+        conditional_P = self._conditional_probabilities(perplexity)
+        P = (conditional_P + conditional_P.T) / (2 * n_samples)
+        P = np.maximum(P, 1e-15)
+        return P
 
     def _conditional_probabilities(self, perplexity, steps=100):
         """
