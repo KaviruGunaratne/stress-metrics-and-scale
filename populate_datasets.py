@@ -3,11 +3,17 @@ import tqdm
 from sklearn import datasets
 import seaborn as sns
 import urllib.request
-
-
+import numpy as np
+import pandas as pd
+import zipfile
+import tempfile
+from glob import glob
+from skimage import io, transform
 import os
-if not os.path.isdir("datasets"):
-    os.mkdir("datasets")
+
+datasets_path = 'datasets'
+if not os.path.isdir(datasets_path):
+    os.mkdir(datasets_path)
 labels_path = "dataset_labels"
 if not os.path.isdir(labels_path):
     os.mkdir(labels_path)
@@ -45,7 +51,7 @@ def loadEspadatoDatasets():
         labels = urllib.request.urlopen(qstr.replace("X.npy", "y.npy"))
 
         # Write the raw binary data of the dataset to a .npy file
-        with open(f'datasets/{name}.npy', 'wb') as fdata:
+        with open(f'{datasets_path}/{name}.npy', 'wb') as fdata:
             for line in data:
                 fdata.write(line)
         
@@ -58,8 +64,6 @@ def loadSmallDatasets():
     """
     Function to load smaller, well-known datasets and save them locally.
     """
-    import pandas as pd
-    import numpy as np
 
     # Load iris dataset
     data = datasets.load_iris()
@@ -67,18 +71,18 @@ def loadSmallDatasets():
     df['target'] = data.target
     df.drop_duplicates(inplace=True)
     X = df[[0, 1, 2, 3]].to_numpy()
-    np.save("datasets/iris.npy", X)
+    np.save(f"{datasets_path}/iris.npy", X)
     labels = df["target"].to_numpy()
     np.save(f"{labels_path}/iris.npy", labels)
 
     # Load wine dataset
     data = datasets.load_wine()
-    np.save("datasets/wine.npy", data.data)
+    np.save(f"{datasets_path}/wine.npy", data.data)
     np.save(f"{labels_path}/wine.npy", data.target)
 
     # Load swiss roll dataset
     X, t = datasets.make_swiss_roll(n_samples=1500)
-    np.save("datasets/swissroll.npy", X)
+    np.save(f"{datasets_path}/swissroll.npy", X)
     np.save(f"{labels_path}/swissroll.npy", t)
 
     # Load penguins dataset
@@ -86,7 +90,7 @@ def loadSmallDatasets():
     cols_num = ['bill_length_mm', 'bill_depth_mm',
                 'flipper_length_mm', 'body_mass_g']
     X = data[cols_num]
-    np.save("datasets/penguins.npy", X)
+    np.save(f"{datasets_path}/penguins.npy", X)
     species_mapping = {species: idx for idx, species in enumerate(data['species'].unique())}
     labels = data['species'].map(species_mapping).to_numpy()
     np.save(f"{labels_path}/penguins.npy", labels)
@@ -102,13 +106,58 @@ def loadSmallDatasets():
     X = data[['acceleration', 'cylinders',
                 'displacement', 'horsepower', 'weight']]
     labels = data['mpg'].to_numpy()
-    np.save("datasets/auto-mpg.npy", X)
+    np.save(f"{datasets_path}/auto-mpg.npy", X)
     np.save(f"{labels_path}/auto-mpg.npy", labels)
 
     # Load s-curve dataset
     X, t = datasets.make_s_curve(n_samples=1500)
-    np.save("datasets/s-curve.npy", X)
+    np.save(f"{datasets_path}/s-curve.npy", X)
     np.save(f"{labels_path}/s-curve.npy", t)
+
+    # Load ORL dataset
+    # This dataset exists in the Espadoto Datasets, but is currently loaded incorrectly in the Espadoto repository, and therefore needs to be manually loaded
+
+
+    url = 'http://www.cl.cam.ac.uk/Research/DTG/attarchive/pub/data/att_faces.zip'
+    
+    # Create a temporary file for the ZIP archive
+    with tempfile.NamedTemporaryFile(delete=False) as tmp_zip:
+        zip_path = tmp_zip.name
+    
+    # Download the ZIP file
+    urllib.request.urlretrieve(url, zip_path)
+    
+    try:
+        # Create a temporary directory for extraction
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with zipfile.ZipFile(zip_path, 'r') as orl:
+                orl.extractall(tmp_dir)
+
+            subjects = sorted(glob(os.path.join(tmp_dir, 's*')))
+
+            img_h = 112 // 5
+            img_w = 92 // 5
+
+            X = np.zeros((len(subjects) * 10, img_h, img_w))
+            y = np.zeros((len(subjects) * 10,), dtype='uint8')
+
+            for i, dir_name in enumerate(subjects):
+                label = int(os.path.basename(dir_name).replace('s', ''))
+
+                for j in range(10):
+                    tmp = io.imread(os.path.join(dir_name, f'{j + 1}.pgm'))
+                    tmp = transform.resize(tmp, (img_h, img_w), preserve_range=True)
+                    X[10 * i + j] = tmp / 255.0
+                    y[10 * i + j] = label
+
+        X = X.reshape((-1, img_h * img_w))
+
+        np.save(f"{datasets_path}/orl.npy", X)
+        np.save(f'{labels_path}/orl.npy', y)
+    finally:
+        # Remove the downloaded ZIP file
+        os.remove(zip_path)
+
 
 
 if __name__ == "__main__":
