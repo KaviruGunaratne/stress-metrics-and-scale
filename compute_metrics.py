@@ -8,12 +8,12 @@ import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 import pandas as pd
 from sklearn.metrics import pairwise_distances
+from psutil import virtual_memory
 
 from metrics import Metrics
 from metrics import MACHINE_EPSILON
 
-
-def compute_all_metrics():
+def compute_stress_metrics(scale_by_ten=True):
     """
     Function to compute all metrics for each dataset in the 'datasets' directory.
     The results are saved in a JSON file.
@@ -31,15 +31,17 @@ def compute_all_metrics():
             # Load and scale dataset
             X = np.load(f"datasets/{datasetName}.npy")
 
-            print(f"Dataset: {datasetName}, size: {X.shape}")
+            # print(f"Dataset: {datasetName}, size: {X.shape}")
             # Compute the metrics for each technique and dataset pair
             for i in range(10):
+                pbar.set_postfix_str(f"Dataset={datasetName} (shape={X.shape}), Run={i}")
                 datasetResults = dict()
                 for alg in ["MDS", "TSNE", 'UMAP', "RANDOM"]:
                     Y = np.load(f"embeddings/{datasetName}_{alg}_{i}.npy")
-                    Y *= 10
+                    if scale_by_ten:
+                        Y *= 10
 
-                    M = Metrics(X, Y)
+                    M = Metrics(X, Y, setbatch=False)
 
                     # Compute and store each metric
                     datasetResults[f'{alg}_raw'] = M.compute_raw_stress()
@@ -53,9 +55,12 @@ def compute_all_metrics():
                 datasetResults = {key: float(val)
                                   for key, val in datasetResults.items()}
                 results[f'{datasetName}_{i}'] = datasetResults
-
-            with open("out10x.json", 'w') as fdata:
-                json.dump(results, fdata, indent=4)
+            if scale_by_ten:
+                with open("out10x.json", 'w') as fdata:
+                    json.dump(results, fdata, indent=4)
+            else:
+                with open("out1x.json", 'w') as fdata:
+                    json.dump(results, fdata, indent=4)
 
 
 def test_curve():
@@ -651,7 +656,8 @@ def draw_shepard_diagrams(perplexity, target_dir, n_runs=10, granularity=10):
                 plt.close(fig)
 
 if __name__ == "__main__":
-    compute_all_metrics()
+    compute_stress_metrics()
+    compute_stress_metrics(scale_by_ten=False)
     # test_curve()
 
     graph_dir = 'graphs'
@@ -663,12 +669,16 @@ if __name__ == "__main__":
     kl_at_infty_csv = 'kl_at_infty.csv'
     scales_kl_csv = 'kl_at_1_and_10.csv'
     scales_to_log = np.array([1, 10])
+    
     normal_min_kl_csv = 'normal_min_kls.csv'
-
+    normal_scales_kl_csv = 'gaussian_kl_at_1_and_10.csv'
+    normal_FSKL_csv = 'gaussian_fskl.csv'
+    
+    
     log_kl_at_infty(perplexity=30, target_dir=csv_dir, target_csv_file=kl_at_infty_csv, n_runs=10)
     log_zadu_kls(perplexity=30, target_dir=csv_dir, target_csv_file=zadu_kl_csv, n_runs=10)
     log_normalized_kls(perplexity=30, target_dir=csv_dir, target_csv_file=y_normalized_kls_csv, n_runs=10)
     log_min_kl(perplexity=30, target_dir=csv_dir, target_csv_file=min_kl_csv, n_runs=10)
-    log_kl_at_scale(perplexity=30, target_dir=csv_dir, target_csv_file=scales_kl_csv, scales=scales_to_log, n_runs=10)
-    # log_min_kl_normal(perplexity=30, target_dir=csv_dir, target_csv_file=normal_min_kl_csv, n_runs=10)
+    log_kl_at_scale(perplexity=30, similarity='t', target_dir=csv_dir, target_csv_file=scales_kl_csv, scales=scales_to_log, n_runs=10)
 
+    graph_kl(scales=np.linspace(0, 15, 350), target_dir=graph_dir, drop_UMAP=True,  n_runs=10, plot_min_kl=True, min_kl_data_filepath=csv_dir + "/" + min_kl_csv)
