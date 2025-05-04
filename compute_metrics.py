@@ -8,12 +8,12 @@ import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 import pandas as pd
 from sklearn.metrics import pairwise_distances
+from psutil import virtual_memory
 
 from metrics import Metrics
 from metrics import MACHINE_EPSILON
 
-
-def compute_all_metrics():
+def compute_stress_metrics(scale_by_ten=True):
     """
     Function to compute all metrics for each dataset in the 'datasets' directory.
     The results are saved in a JSON file.
@@ -31,15 +31,17 @@ def compute_all_metrics():
             # Load and scale dataset
             X = np.load(f"datasets/{datasetName}.npy")
 
-            print(f"Dataset: {datasetName}, size: {X.shape}")
+            # print(f"Dataset: {datasetName}, size: {X.shape}")
             # Compute the metrics for each technique and dataset pair
             for i in range(10):
+                pbar.set_postfix_str(f"Dataset={datasetName} (shape={X.shape}), Run={i}")
                 datasetResults = dict()
                 for alg in ["MDS", "TSNE", 'UMAP', "RANDOM"]:
                     Y = np.load(f"embeddings/{datasetName}_{alg}_{i}.npy")
-                    Y *= 10
+                    if scale_by_ten:
+                        Y *= 10
 
-                    M = Metrics(X, Y)
+                    M = Metrics(X, Y, setbatch=False)
 
                     # Compute and store each metric
                     datasetResults[f'{alg}_raw'] = M.compute_raw_stress()
@@ -53,9 +55,12 @@ def compute_all_metrics():
                 datasetResults = {key: float(val)
                                   for key, val in datasetResults.items()}
                 results[f'{datasetName}_{i}'] = datasetResults
-
-            with open("out10x.json", 'w') as fdata:
-                json.dump(results, fdata, indent=4)
+            if scale_by_ten:
+                with open("out10x.json", 'w') as fdata:
+                    json.dump(results, fdata, indent=4)
+            else:
+                with open("out1x.json", 'w') as fdata:
+                    json.dump(results, fdata, indent=4)
 
 
 def test_curve():
@@ -262,37 +267,49 @@ def _compute_kl_divergences_in_chunks(X, Y, scales, perplexity):
     
     return kl_divergences
 
-def log_min_kl(perplexity, target_dir, target_csv_file, n_runs=10):
+
+def calculate_min_kl(X, Y, perplexity, y_similarity='t'):
     """
-    Calculate and log the scale at which KL Divergence is minimized and the corresponding KL Divergence for every single embedding.
-    The data is stored as a CSV file in target_dir/target_csv_file.
-    To load the CSV file into a Pandas.DataFrame, execute the following line: \\
-    `pd.read_csv(f'{target_dir}/{target_csv_file}', index_col=[0, 1, 2])`
+    Use minimize_scalar in Scipy.optimize to find the inimizing coordinates of KL Divergence w.r.t. scale.
     """
-
-    # Create target_dir if not exists
-    if not os.path.isdir(target_dir):
-        os.mkdir(target_dir)
-
-    datasets = os.listdir('datasets')
-    # datasets = ['epileptic.npy']
-    algorithms = ["RANDOM", "MDS", "UMAP", "TSNE"]
-    n_runs = 5
-
-    # Load DataFrame if CSV file exists, else initialize new DataFrame
-    if os.path.exists(f"{target_dir}/{target_csv_file}"):
-        min_kls = pd.read_csv(f'{target_dir}/{target_csv_file}', index_col=[0, 1, 2])
-    else:
-        index = pd.MultiIndex.from_product(
-            [[datasetStr.replace(".npy", "") for datasetStr in datasets],
-            [f'Run {i}' for i in range(n_runs)],
-            ['x', 'y']],
-            names=["Dataset", "Run", "Coord"]
-        )
-
-        min_kls = pd.DataFrame(index=index, columns=algorithms)
-    min_kls = min_kls.sort_index()
+    def get_kl(scale):
+        M = Metrics(X, Y * scale, scaling_factors=np.empty(0))
+        return M.compute_kl_divergence(perplexity=perplexity, y_similarity=y_similarity)
     
+    res = minimize_scalar(get_kl, bounds=(0, 300))
+    return (res.x, res.fun)
+          
+  
+def fill_dataframe(df: pd.DataFrame, target_dir, target_csv_file, datasets, algorithms, n_runs : int, func):
+    """
+    Fills DataFrame df with values according to function func while looping through each embedding in embeddings/
+    
+    Parameters
+    ----------
+
+    target_dir : string
+        Directory where the data is to be stored
+
+    target_csv_file : string
+        CSV file to write the data of the DataFrame df is written
+
+    df : pd.DataFrame
+        DataFrame to which the data is being written to
+
+    n_runs : int
+        Number of runs for which embeddings have been calculated per dataset
+        
+    func : function
+        Function that decides how to fill df. \\
+        Should return a tuple (index_labels, values). \\
+        index_labels and values are equal length iterables where index_labels contains the index label
+        at which the DataFrame is to be filled, and values contains the values that should be filled at the location specified by index_labels
+        
+    func_kwargs: dict
+        Dictionary with keyword arguments of func
+    """
+
+
 
     # Record min KL 
     with tqdm.tqdm(total=(len(datasets) * n_runs * len(algorithms))) as pbar:
@@ -310,7 +327,8 @@ def log_min_kl(perplexity, target_dir, target_csv_file, n_runs=10):
                     print(f"Entries for {datasetName}, Run {n} have already been computed. Skipped.")
                     pbar.update(4)
                     continue
-
+                
+                # Add current Dataset and run to progress bar
                 pbar.set_postfix_str(f"Dataset={datasetName}, Run={n}")
 
                 for alg in algorithms:
@@ -320,27 +338,53 @@ def log_min_kl(perplexity, target_dir, target_csv_file, n_runs=10):
                         print(f"embeddings/{datasetName}_{alg}_{n}.npy does not exist.")
                         print(f"Run {n} is skipped.")
                         break
-                    coords = calculate_min_kl(X, Y, perplexity)
-                    min_kls.loc[(datasetName, f'Run {n}', 'x'), alg] = coords[0]
-                    min_kls.loc[(datasetName, f'Run {n}', 'y'), alg] = coords[1]
+
+                    index_labels, values = func(X=X, Y=Y, n=n, datasetName=datasetName)
+                    for index_label, value in zip(index_labels, values):
+                        df.loc[index_label, alg] = value
 
                     pbar.update(1)
-                min_kls.to_csv(f"{target_dir}/{target_csv_file}")
+                df.to_csv(f"{target_dir}/{target_csv_file}")
+
+        df.to_csv(f"{target_dir}/{target_csv_file}")
 
 
-    min_kls.to_csv(f"{target_dir}/{target_csv_file}")
+def log_min_kl(perplexity, target_dir, target_csv_file, n_runs=10):
+    # Create target_dir if not exists
+    if not os.path.isdir(target_dir):
+        os.mkdir(target_dir)
 
+    datasets = os.listdir('datasets')
+    # datasets = ['iris.npy', 'wine.npy', 'orl.npy', 'auto-mpg.npy']
+    algorithms = ["RANDOM", "MDS", "UMAP", "TSNE"]
 
-def calculate_min_kl(X, Y, perplexity, y_similarity='t'):
-    """
-    Use minimize_scalar in Scipy.optimize to find the inimizing coordinates of KL Divergence w.r.t. scale.
-    """
-    def get_kl(scale):
-        M = Metrics(X, Y * scale, scaling_factors=np.empty(0))
-        return M.compute_kl_divergence(perplexity=perplexity, y_similarity=y_similarity)
-    
-    res = minimize_scalar(get_kl, bounds=(0, 300))
-    return (res.x, res.fun)
+    # Load DataFrame if CSV file exists, else initialize new DataFrame
+    if os.path.exists(f"{target_dir}/{target_csv_file}"):
+        min_kls = pd.read_csv(f'{target_dir}/{target_csv_file}', index_col=[0, 1, 2])
+    else:
+        index = pd.MultiIndex.from_product(
+            [
+                [datasetStr.replace(".npy", "") for datasetStr in datasets],
+                [f'Run {i}' for i in range(n_runs)],
+                ['x', 'y']
+            ],
+            names=["Dataset", "Run", "Coord"]
+        )
+
+        min_kls = pd.DataFrame(index=index, columns=algorithms)
+        min_kls.to_csv(f"{target_dir}/{target_csv_file}")
+    # Sort DataFrame index
+    min_kls = min_kls.sort_index()
+
+    # Define function to fill min_kls with fill_dataframe
+    def get_min_kls(X, Y, n, datasetName, perplexity=perplexity):
+        coords = calculate_min_kl(X, Y, perplexity)
+        index_labels = [(datasetName, f'Run {n}', 'x'), (datasetName, f'Run {n}', 'y')]
+
+        return index_labels, coords
+
+    # Fill min_kls
+    fill_dataframe(df=min_kls, target_dir=target_dir, target_csv_file=target_csv_file, datasets=datasets, algorithms=algorithms, n_runs=n_runs, func=get_min_kls)
 
 def log_normalized_kl(perplexity, target_dir, target_csv_file, n_runs=10):
     # Create target_dir if not exists
@@ -363,58 +407,72 @@ def log_normalized_kl(perplexity, target_dir, target_csv_file, n_runs=10):
             names=["Dataset", "Run", "Coord"]
         )
 
+        normalized_kls = pd.DataFrame(index=index, columns=algorithms)
+        normalized_kls.to_csv(f"{target_dir}/{target_csv_file}")
+        
+    normalized_kls = normalized_kls.sort_index()
+
+    # Define function to fill normalized_kls with fill_dataframe
+    def get_normalized_kls(X, Y, n, datasetName, perplexity=perplexity):
+        dX = pairwise_distances(X)
+        dY = pairwise_distances(Y)
+        normalizing_factor = 1 / np.max(dY)
+        dY *= normalizing_factor
+
+        M = Metrics(dX, dY, precomputed=True, setbatch=False)
+        
+        kl = M.compute_kl_divergence(perplexity=perplexity)
+
+        coords = (normalizing_factor, kl)
+        index_labels = [(datasetName, f'Run {n}', 'x'), (datasetName, f'Run {n}', 'y')]
+
+        return index_labels, coords
+        
+    fill_dataframe(df=normalized_kls, target_dir=target_dir, target_csv_file=target_csv_file, datasets=datasets, algorithms=algorithms, n_runs=n_runs, func=get_normalized_kls)
+
+def log_zadu_kls(perplexity, target_dir, target_csv_file, n_runs=10):
+    # Create target_dir if not exists
+    if not os.path.isdir(target_dir):
+        os.mkdir(target_dir)
+
+    datasets = os.listdir('datasets')
+    algorithms = ["RANDOM", "MDS", "UMAP", "TSNE"]
+
+    # Load DataFrame if CSV file exists, else initialize new DataFrame
+    if os.path.exists(f"{target_dir}/{target_csv_file}"):
+        zadu_kls = pd.read_csv(f'{target_dir}/{target_csv_file}', index_col=[0, 1])
+    else:
+        index = pd.MultiIndex.from_product(
+            [
+                [datasetStr.replace(".npy", "") for datasetStr in datasets],
+                [f'Run {i}' for i in range(n_runs)]
+            ],
+            names=["Dataset", "Run"]
+        )
+
         zadu_kls = pd.DataFrame(index=index, columns=algorithms)
         zadu_kls.to_csv(f"{target_dir}/{target_csv_file}")
         
     zadu_kls = zadu_kls.sort_index()
-    
 
-    # Record KL after normalizing 
-    with tqdm.tqdm(total=(len(datasets) * (n_runs) * len(algorithms))) as pbar:
+    # Define function to fill zadu_kls with fill_dataframe
+    def get_zadu_kls(X, Y, n, datasetName, perplexity=perplexity):
+        dX = pairwise_distances(X)
+        dY = pairwise_distances(Y)
+        dX /= np.max(dX)
+        dY /= np.max(dY)
 
-        for datasetStr in datasets:
-            datasetName = datasetStr.replace(".npy", "")
-            if "fashion_mnist" in datasetStr:
-                datasetName = "fashion_mnist"
+        M = Metrics(dX, dY, precomputed=True, setbatch=False)
+        
+        kl = M.compute_kl_divergence(perplexity=perplexity)
 
-            X = np.load(f"datasets/{datasetName}.npy")
-            dX = pairwise_distances(X)
-            dX /= np.max(dX)
+        index_labels = [(datasetName, f'Run {n}')]
 
-            for n in range(n_runs):
-                # Skip if data has already been filled
-                if zadu_kls.loc[datasetName, f"Run {n}"].notna().all(axis=None):
-                    print(f"Entries for {datasetName}, Run {n} have already been computed. Skipped.")
-                    pbar.update(4)
-                    continue
+        return index_labels, (kl,)
+        
+    fill_dataframe(df=zadu_kls, target_dir=target_dir, target_csv_file=target_csv_file, datasets=datasets, algorithms=algorithms, n_runs=n_runs, func=get_zadu_kls)
 
-                pbar.set_postfix_str(f"Dataset={datasetName}, Run={n}")
-
-                for alg in algorithms:
-                    try:
-                        Y = np.load(f"embeddings/{datasetName}_{alg}_{n}.npy")
-                        dY = pairwise_distances(Y)
-                        
-                        normalizing_factor = 1/ np.max(dY)
-                        dY *= normalizing_factor
-                    except FileNotFoundError:
-                        print(f"embeddings/{datasetName}_{alg}_{n}.npy does not exist.")
-                        print(f"Run {n} is skipped.")
-                        break
-
-                    M = Metrics(dX, dY, precomputed=True, setbatch=False)
-                    zadu_kls.loc[(datasetName, f'Run {n}', 'x'), alg] = normalizing_factor
-                    zadu_kls.loc[(datasetName, f'Run {n}', 'y'), alg] = M.compute_kl_divergence(perplexity=perplexity)
-                    
-                    pbar.update(1)
-                zadu_kls.to_csv(f"{target_dir}/{target_csv_file}")
-
-
-    zadu_kls.to_csv(f"{target_dir}/{target_csv_file}")
-                    
-
-def kl_at_scale(perplexity, target_dir, target_csv_file, scales, n_runs):
-
+def log_kl_at_scale(perplexity, target_dir, target_csv_file, scales, n_runs=10):
     # Create target_dir if not exists
     if not os.path.isdir(target_dir):
         os.mkdir(target_dir)
@@ -435,48 +493,96 @@ def kl_at_scale(perplexity, target_dir, target_csv_file, scales, n_runs):
 
         kls_at_scales = pd.DataFrame(index=index, columns=algorithms)
     kls_at_scales = kls_at_scales.sort_index()
+
+    def get_kls_at_scale(X, Y, n, datasetName, perplexity=perplexity):
+        M = Metrics(X, Y, setbatch=True, precomputed=False, scaling_factors=scales)
+        kls = M.compute_kl_divergences(perplexity=perplexity)
+
+        index_labels = []
+        for scale in scales:
+            index_labels.append((datasetName, f'Run {n}', scale))
+
+        return index_labels, kls
     
+    fill_dataframe(kls_at_scales, target_dir, target_csv_file, datasets, algorithms, n_runs, func=get_kls_at_scale)
 
-    # Record min KL 
-    with tqdm.tqdm(total=(len(datasets) * (n_runs) * len(algorithms))) as pbar:
+def log_kl_at_infty(perplexity, target_dir, target_csv_file, n_runs=10):
+    # Create target_dir if not exists
+    if not os.path.isdir(target_dir):
+        os.mkdir(target_dir)
 
-        for datasetStr in datasets:
-            datasetName = datasetStr.replace(".npy", "")
-            if "fashion_mnist" in datasetStr:
-                datasetName = "fashion_mnist"
+    datasets = os.listdir('datasets')
+    algorithms = ["RANDOM", "MDS", "UMAP", "TSNE"]
 
-            X = np.load(f"datasets/{datasetName}.npy")
+    # Load DataFrame if CSV file exists, else initialize new DataFrame
+    if os.path.exists(f"{target_dir}/{target_csv_file}"):
+        kls_at_infty = pd.read_csv(f'{target_dir}/{target_csv_file}', index_col=[0, 1])
+    else:
+        index = pd.MultiIndex.from_product(
+            [
+                [datasetStr.replace(".npy", "") for datasetStr in datasets],
+                [f'Run {i}' for i in range(n_runs)]
+            ],
+            names=["Dataset", "Run"]
+        )
 
-            for n in range(n_runs):
-                # Skip if data has already been filled
-                if kls_at_scales.loc[datasetName, f"Run {n}"].notna().all(axis=None):
-                    print(f"Entries for {datasetName}, Run {n} have already been computed. Skipped.")
-                    pbar.update(4)
-                    continue
+        kls_at_infty = pd.DataFrame(index=index, columns=algorithms)
+        kls_at_infty.to_csv(f"{target_dir}/{target_csv_file}")
+        
+    kls_at_infty = kls_at_infty.sort_index()
 
-                pbar.set_postfix_str(f"Dataset={datasetName}, Run={n}")
+    # Function to fill kls_at_infty using fill_dataframe
+    def get_kl_at_infty(X, Y, n, datasetName, perplexity=perplexity):
+        M = Metrics(X, Y, setbatch=False)
 
-                for alg in algorithms:
-                    try:
-                        Y = np.load(f"embeddings/{datasetName}_{alg}_{n}.npy")
-                    except FileNotFoundError:
-                        print(f"embeddings/{datasetName}_{alg}_{n}.npy does not exist.")
-                        print(f"Run {n} is skipped.")
-                        break
-                    
-                    M = Metrics(X, Y, setbatch=True, precomputed=False, scaling_factors=scales)
-                    kls = M.compute_kl_divergences(perplexity=perplexity)
+        kl = M.compute_kl_divergence_at_infty(perplexity=perplexity)
+        index_labels = [(datasetName, f'Run {n}')]
 
-                    for scale, kl in zip(scales, kls):
-                        kls_at_scales.loc[(datasetName, f'Run {n}', scale), alg] = kl
+        return index_labels, (kl,)
+    
+    # Fill kls_at_infty
+    fill_dataframe(kls_at_infty, target_dir, target_csv_file, datasets, algorithms, n_runs, get_kl_at_infty)
 
-                    pbar.update(1)
-                kls_at_scales.to_csv(f"{target_dir}/{target_csv_file}")
+def log_min_kl_normal(perplexity, target_dir, target_csv_file, n_runs=10):
+    # Create target_dir if not exists
+    if not os.path.isdir(target_dir):
+        os.mkdir(target_dir)
+
+    # datasets = os.listdir('datasets')
+    datasets = ['iris.npy', 'wine.npy', 'orl.npy', 'auto-mpg.npy']
+    algorithms = ["RANDOM", "MDS", "UMAP", "TSNE"]
+
+    # Load DataFrame if CSV file exists, else initialize new DataFrame
+    if os.path.exists(f"{target_dir}/{target_csv_file}"):
+        min_kls = pd.read_csv(f'{target_dir}/{target_csv_file}', index_col=[0, 1, 2])
+    else:
+        index = pd.MultiIndex.from_product(
+            [
+                [datasetStr.replace(".npy", "") for datasetStr in datasets],
+                [f'Run {i}' for i in range(n_runs)],
+                ['x', 'y']
+            ],
+            names=["Dataset", "Run", "Coord"]
+        )
+
+        min_kls = pd.DataFrame(index=index, columns=algorithms)
+        min_kls.to_csv(f"{target_dir}/{target_csv_file}")
+    # Sort DataFrame index
+    min_kls = min_kls.sort_index()
+
+    # Define function to fill min_kls with fill_dataframe
+    def get_min_kls(X, Y, n, datasetName, perplexity=perplexity):
+        coords = calculate_min_kl(X, Y, perplexity, y_similarity='normal')
+        index_labels = [(datasetName, f'Run {n}', 'x'), (datasetName, f'Run {n}', 'y')]
+
+        return index_labels, coords
+
+    # Fill min_kls
+    fill_dataframe(df=min_kls, target_dir=target_dir, target_csv_file=target_csv_file, datasets=datasets, algorithms=algorithms, n_runs=n_runs, func=get_min_kls)
 
 
-    kls_at_scales.to_csv(f"{target_dir}/{target_csv_file}")
 
-def draw_shepard_diagrams(perplexity, target_dir, n_runs=10):
+def draw_shepard_diagrams(perplexity, target_dir, n_runs=10, granularity=10):
     """
     Plots the Shepard diagram between the high-dimensional and low-dimensional probability values à la t-SNE corresponding to each embedding.
     The embeddings are considered at the default scale of 1.
@@ -492,6 +598,9 @@ def draw_shepard_diagrams(perplexity, target_dir, n_runs=10):
 
     n_runs : int
       Number of groups of embeddings (from t-SNE, UMAP, MDS, and Random) for each dataset whose diagrams are drawn
+
+    granularity : int
+        Determines granularity of mean-value graph in the Shepard diagram
     """
 
     if not os.path.isdir(target_dir):
@@ -518,14 +627,24 @@ def draw_shepard_diagrams(perplexity, target_dir, n_runs=10):
 
                     M = Metrics(X, Y, setbatch=False, precomputed=False, scaling_factors=None)
                     conditional_P = M._conditional_probabilities(perplexity=perplexity)
-                    P = ((conditional_P + conditional_P.T) / (2 * conditional_P.shape[0]))
-                    Q = M._get_Q(is_batch=False)
+                    P = ((conditional_P + conditional_P.T) / (2 * conditional_P.shape[0])).flatten()
+                    Q = M._get_Q(is_batch=False).flatten()
 
+                    # Plot Shepard diagram
                     ax.scatter(P, Q, s=5, alpha=1.)
                     ax.set_title(alg, fontweight='bold', fontsize='x-large')
                     ax.set_ylabel("Low-Dimensional Probabilities Q")
                     ax.set_xlabel("High-Dimensional Probabilities P")
                     ax.tick_params(axis='x', rotation=45)
+
+                    # Plot mean graph
+                    p_intervals = np.linspace(np.min(P), np.max(P), granularity)
+                    Q_in_intervals = [Q[(low_lim < P) & (P <= up_lim)] for low_lim, up_lim in zip(p_intervals, p_intervals[1:])]
+                    interval_is_nonempty = np.array([(Q_vals.size != 0) for Q_vals in Q_in_intervals])
+                    p_intervals = p_intervals[:-1][interval_is_nonempty]
+                    mean_q_values = np.array([Q_vals.mean() for Q_vals in Q_in_intervals if not (Q_vals.size == 0)])
+
+                    ax.plot(p_intervals, mean_q_values, c='red', linewidth=3.)
 
                     pbar.update(1)
 
@@ -537,12 +656,29 @@ def draw_shepard_diagrams(perplexity, target_dir, n_runs=10):
                 plt.close(fig)
 
 if __name__ == "__main__":
-    compute_all_metrics()
+    compute_stress_metrics()
+    compute_stress_metrics(scale_by_ten=False)
     # test_curve()
-    target_dir = 'test-kl-figures'
-    min_kl_csv_file = 'min_kls_new.csv'
-    log_min_kl(perplexity=30, n_runs=10, target_dir=target_dir, target_csv_file=min_kl_csv_file)
-    zadu_kl_csv_file = 'y_normalized_kls.csv'
-    log_normalized_kl(perplexity=30, target_dir=target_dir, target_csv_file=zadu_kl_csv_file, n_runs=10)
-    scales_to_graph = np.linspace(0, 15, 250)
-    graph_kl(scales=scales_to_graph, target_dir=target_dir, n_runs=2, drop_UMAP=False, min_kl_data_filepath=f'{target_dir}/{min_kl_csv_file}', plot_normalized_kl=True, normalized_kl_data_filepath=f'{target_dir}/{zadu_kl_csv_file}')
+
+    graph_dir = 'graphs'
+    csv_dir = 'csv_files'
+
+    min_kl_csv = 'min_kls.csv'
+    zadu_kl_csv = 'zadu_kls.csv'
+    y_normalized_kls_csv = 'y_normalized_kls.csv'
+    kl_at_infty_csv = 'kl_at_infty.csv'
+    scales_kl_csv = 'kl_at_1_and_10.csv'
+    scales_to_log = np.array([1, 10])
+    
+    normal_min_kl_csv = 'normal_min_kls.csv'
+    normal_scales_kl_csv = 'gaussian_kl_at_1_and_10.csv'
+    normal_FSKL_csv = 'gaussian_fskl.csv'
+    
+    
+    log_kl_at_infty(perplexity=30, target_dir=csv_dir, target_csv_file=kl_at_infty_csv, n_runs=10)
+    log_zadu_kls(perplexity=30, target_dir=csv_dir, target_csv_file=zadu_kl_csv, n_runs=10)
+    log_normalized_kls(perplexity=30, target_dir=csv_dir, target_csv_file=y_normalized_kls_csv, n_runs=10)
+    log_min_kl(perplexity=30, target_dir=csv_dir, target_csv_file=min_kl_csv, n_runs=10)
+    log_kl_at_scale(perplexity=30, similarity='t', target_dir=csv_dir, target_csv_file=scales_kl_csv, scales=scales_to_log, n_runs=10)
+
+    graph_kl(scales=np.linspace(0, 15, 350), target_dir=graph_dir, drop_UMAP=True,  n_runs=10, plot_min_kl=True, min_kl_data_filepath=csv_dir + "/" + min_kl_csv)

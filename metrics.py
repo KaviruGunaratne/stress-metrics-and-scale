@@ -2,10 +2,9 @@
 import numpy as np 
 from sklearn.metrics import pairwise_distances
 import zadu
+from scipy.special import logsumexp
 
 MACHINE_EPSILON = np.finfo(np.float64).eps
-
-#TODO: Add check that no two points are too close; if they are, add small random noise
 
 class Metrics():
     """
@@ -130,32 +129,13 @@ class Metrics():
         perplexity : Perplexity as described in Hinton and Roweis (2002) https://www.cs.toronto.edu/~hinton/absps/sne.pdf
         """
         # High-dimensional probability space
-        n_samples = self.dX.shape[0]
-        conditional_P = self._conditional_probabilities(perplexity)
-        P = (conditional_P + conditional_P.T) / (2 * n_samples)    
+        P = self._joint_probabilities(perplexity)
 
         # Low-dimensional probability space
         Q = self._get_Q(is_batch=False, similarity=y_similarity)
 
         # KL Divergence
-        log_P = np.zeros_like(P)
-        np.log2(P, out=log_P, where=P>0)
-        log_Q = np.zeros_like(Q)
-        np.log2(Q, out=log_Q, where=Q>0)
-
-        if np.any(log_P == -np.inf) or np.any(log_P == np.inf):
-            print("log_P has +inf or -inf")
-        if np.any(log_Q == -np.inf) or np.any(log_Q == np.inf):
-            print("log_Q has +inf or -inf")
-        if np.isnan(log_P).any():
-            print("log_P has NaN")
-        if np.isnan(log_Q).any():
-            print("log_Q has NaN")
-        if np.isnan(Q).any():
-            print("Q has NaN")
-        kl_divergence = (P * (log_P - log_Q)).sum()
-
-
+        kl_divergence = (P * np.log(P / Q)).sum()
         return kl_divergence
     
     def compute_kl_divergences(self, perplexity, y_similarity='t'):
@@ -169,21 +149,15 @@ class Metrics():
         """
 
         # High-dimensional probability space
-        n_samples = self.dX.shape[0]
-        conditional_P = self._conditional_probabilities(perplexity)
-        P = ((conditional_P + conditional_P.T) / (2 * n_samples))
+        P = self._joint_probabilities(perplexity)
 
-        # Compute low-dimensional probability space for all Y_batch
+        # Low-dimensional probability space for all Y_batch
         Q_batch = self._get_Q(is_batch=True, similarity=y_similarity)
 
-        # KL Divergence for all Y_batch
-        log_P = np.zeros_like(P)
-        np.log2(P, out=log_P, where=P>0)
-        log_Q_batch = np.zeros_like(Q_batch)
-        np.log2(Q_batch, out=log_Q_batch, where=Q_batch>0)
-
-        kl_divergences = (P * (log_P - log_Q_batch)).sum(axis=(1, 2))
+        # KL Divergence
+        kl_divergences = (P * np.log(P / Q_batch)).sum(axis=(1, 2))
         return kl_divergences
+
     
     def compute_kl_divergence_at_infty(self, perplexity):
         """
@@ -195,24 +169,17 @@ class Metrics():
             Perplexity as described in Hinton and Roweis (2002) https://www.cs.toronto.edu/~hinton/absps/sne.pdf
         """
 
-        # High dimensional probability space
-        n_samples = self.dX.shape[0]
-        conditional_P = self._conditional_probabilities(perplexity)
-        P = ((conditional_P + conditional_P.T) / (2 * n_samples))
+        # High-dimensional probability space
+        P = self._joint_probabilities(perplexity)
 
         # Low dimensional probability space
-        Q = np.zeros_like(self.dY)
-        Q[self.dY != 0] = self.dY[self.dY != 0] ** -2
+        Q = np.maximum(self.dY, MACHINE_EPSILON) ** -2
         np.fill_diagonal(Q, 0)
         Q /= Q.sum()
+        Q = np.maximum(Q, 1e-15)
 
         # KL Divergence
-        log_P = np.zeros_like(P)
-        np.log2(P, out=log_P, where=P>0)
-        log_Q = np.zeros_like(Q)
-        np.log2(Q, out=log_Q, where=Q>0)
-        
-        kl_divergence = (P * (log_P - log_Q)).sum()
+        kl_divergence = (P * np.log(P / Q)).sum()
 
         return kl_divergence
     
@@ -229,33 +196,69 @@ class Metrics():
           't' -> The Student's t-distribution is used (like in t-SNE)
           'normal' -> The normal distribution is used (like in SNE)
         """
+        # # Fill Q
+        # if similarity == 't':
+        #     if is_batch:
+        #         Q = (np.square(self.dY_batch) + 1.0) ** -1
+        #     else:
+        #         Q = (np.square(self.dY) + 1.0) ** -1
+        # elif similarity == 'normal':
+        #     if is_batch:
+        #         Q = np.exp(-1 * np.square(self.dY_batch))
+        #     else:
+        #         Q = np.exp(-1 * np.square(self.dY))
+        #     Q = np.maximum(Q, MACHINE_EPSILON)
+        # else:
+        #     raise ValueError(f"Invalid string: '{similarity}' is not a valid value for the parameter 'similarity'")
+
+        # # Fill diagonal with 0
+        # if is_batch:
+        #     rows = np.arange(Q.shape[1])
+        #     Q[:, rows, rows] = 0 # Fill diagonal with 0
+        #     Q /= Q.sum(axis=(1, 2), keepdims=True)
+        # else:
+        #     np.fill_diagonal(Q, 0)
+        #     Q /= Q.sum()
+
+        # Q = np.maximum(Q, 1e-15)
 
         if similarity == 't':
             if is_batch:
-                Q = (np.square(self.dY_batch) + 1) ** -1
+                Q = (np.square(self.dY_batch) + 1.0) ** -1
                 rows = np.arange(Q.shape[1])
                 Q[:, rows, rows] = 0 # Fill diagonal with 0
                 Q /= Q.sum(axis=(1, 2), keepdims=True)
             else:
-                Q = 1 / (np.square(self.dY) + 1)
+                Q = (np.square(self.dY) + 1.0) ** -1
                 np.fill_diagonal(Q, 0)
                 Q /= Q.sum()
+        
         elif similarity == 'normal':
             if is_batch:
-                Q = np.exp(-1 * np.square(self.dX))
-                rows = np.arange(Q.shape[1])
-                Q[:, rows, rows] = 0 # Fill diagonal with 0
-                Q /= Q.sum(axis=(1, 2), keepdims=True)
+                negsq_dist = -np.square(self.dY_batch)
+                rows = np.arange(negsq_dist.shape[1])
+                negsq_dist[:, rows, rows] = -np.inf # Fill diagonal with -inf (since exp(-inf) == 0)
+                Q = np.exp(negsq_dist - logsumexp(negsq_dist, axis=(1,2), keepdims=True))
             else:
-                Q = np.exp(-1 * np.square(self.dY))
-                np.fill_diagonal(Q, 0)
-                Q /= Q.sum()
+                negsq_dist = -np.square(self.dY)
+                np.fill_diagonal(negsq_dist, -np.inf) # Fill diagonal with -inf (since exp(-inf) == 0)
+                Q = np.exp(negsq_dist - logsumexp(negsq_dist, keepdims=True))
         else:
             raise ValueError(f"Invalid string: '{similarity}' is not a valid value for the parameter 'similarity'")
+            
+        # To prevent zero division error
+        Q = np.maximum(Q, 1e-15)
+
         return Q
 
+    def _joint_probabilities(self, perplexity):
+        n_samples = self.dX.shape[0]
+        conditional_P = self._conditional_probabilities(perplexity)
+        P = (conditional_P + conditional_P.T) / (2 * n_samples)
+        P = np.maximum(P, 1e-15)
+        return P
 
-    def _conditional_probabilities(self, perplexity, steps=40):
+    def _conditional_probabilities(self, perplexity, steps=100):
         """
         Calculate conditional probability matrix P corresponding to SNE algorithm
         
@@ -267,7 +270,7 @@ class Metrics():
         steps : Number of steps for binary search for variances of Gaussian distributions
         """
         n_samples = self.dX.shape[0]
-        desired_entropy = np.full((n_samples, 1), np.log2(perplexity))
+        desired_entropy = np.full((n_samples, 1), np.log(perplexity))
         beta = np.ones((n_samples, 1)) # (2 * var_i ** 2) in the exponent of the Gaussian distribution
         beta_min = np.zeros((n_samples, 1), dtype=np.float64)
         beta_max = np.full((n_samples, 1), np.inf)
@@ -275,14 +278,18 @@ class Metrics():
         # Binary Search
         for _ in range(steps):
             # Create conditional probability distributions
-            P = np.where(self.dX != 0, np.exp(-1 * np.square(self.dX) / beta), 0)
-            row_sums = np.maximum(P.sum(axis=1, keepdims=True), MACHINE_EPSILON)
+            P = np.exp(-1 * np.square(self.dX) / beta)
+            np.fill_diagonal(P, 0)
+            row_sums = P.sum(axis=1, keepdims=True)
+            row_sums[row_sums == 0] = 1e-8
             P = P / row_sums
+            P = np.maximum(P, 1e-15)
 
             # Calculate entropy
-            entropy = -1 * (P * np.log2(P, where=(P > MACHINE_EPSILON))).sum(axis=1, keepdims=True)
+            log_P = np.log(P)
+            entropy = -1 * (P * log_P).sum(axis=1, keepdims=True)
             entropy_diff = entropy - desired_entropy
-    
+
 
             # Stop if variances sufficiently match perplexity
             if np.all(np.abs(entropy_diff) < 1e-5):
