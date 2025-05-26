@@ -159,7 +159,7 @@ def graph_kl(
     if drop_UMAP:
         algorithms = ["RANDOM", "MDS", "TSNE"]
     else:
-        algorithms = ["RANDOM", "MDS", "UMAP", "TSNE"]
+        algorithms = ['TSNE', 'UMAP', 'MDS', 'RANDOM']
 
     # Load minimum point data
     if plot_min_kl:

@@ -3,6 +3,7 @@ import numpy as np
 from sklearn.metrics import pairwise_distances
 import zadu
 from scipy.special import logsumexp
+from scipy.optimize import minimize_scalar
 
 MACHINE_EPSILON = np.finfo(np.float64).eps
 
@@ -158,7 +159,40 @@ class Metrics():
         kl_divergences = (P * np.log(P / Q_batch)).sum(axis=(1, 2))
         return kl_divergences
 
-    
+    def SNKL(self, perplexity=30, ret_scale=True, max_bound=300):
+        """
+        Calculate Scale-Normalized KL Divergence (KL divergence and scale at the scale KL divergence is minimum)
+
+        Parameters
+        ----------
+
+        perplexity : float
+            Perplexity as described in Hinton and Roweis (2002) https://www.cs.toronto.edu/~hinton/absps/sne.pdf
+
+        ret_scale : bool
+            if True, returns scale, min_KL tuple
+            else, returns min_KL
+
+        max_bound : positive number
+            upper bound of interval within which minimum is searched (If returned KL divergence is almost equal to max_bound, max_bound was likely too small)
+        """
+        # High-dimensional probability space
+        P = self._joint_probabilities(perplexity)
+
+        # Calculate KL divergence for scale=scale
+        def get_kl(scale):
+            Q = self._get_Q(is_batch=False, scale=scale, similarity='t')
+            kl_divergence = (P * np.log(P / Q)).sum()
+            return kl_divergence
+        
+        # Calculate minimum KL
+        res = minimize_scalar(get_kl, bounds=(0, max_bound))
+
+        if ret_scale:
+            return (res.x, res.fun)
+        else:
+            return res.fun
+
     def compute_kl_divergence_at_infty(self, perplexity):
         """
         Compute the KL Divergence between probability distributions of X and Y à la t-SNE at infinite scale of the embedding
@@ -183,7 +217,7 @@ class Metrics():
 
         return kl_divergence
     
-    def _get_Q(self, is_batch: bool, similarity='t'):
+    def _get_Q(self, is_batch: bool, scale: 1, similarity='t'):
         """
         Calculate the low dimensional probability distribution corresponding to Y
         Parameters
@@ -195,6 +229,11 @@ class Metrics():
         similarity : str
           't' -> The Student's t-distribution is used (like in t-SNE)
           'normal' -> The normal distribution is used (like in SNE)
+
+        scale : float
+          default = 1
+          Only relevant if is_batch = False and similarity = 't'.
+          Scale to scale self.dY by
         """
         # # Fill Q
         # if similarity == 't':
@@ -229,7 +268,7 @@ class Metrics():
                 Q[:, rows, rows] = 0 # Fill diagonal with 0
                 Q /= Q.sum(axis=(1, 2), keepdims=True)
             else:
-                Q = (np.square(self.dY) + 1.0) ** -1
+                Q = (np.square(self.dY * scale) + 1.0) ** -1
                 np.fill_diagonal(Q, 0)
                 Q /= Q.sum()
         
