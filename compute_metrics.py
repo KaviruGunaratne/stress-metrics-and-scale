@@ -13,6 +13,133 @@ from psutil import virtual_memory
 from metrics import Metrics
 from metrics import MACHINE_EPSILON
 
+def log_stress_metrics(target_dir: str, target_csv_file: str, n_runs=10):
+    # Create target_dir if not exists
+    if not os.path.isdir(target_dir):
+        os.mkdir(target_dir)
+
+    datasets = os.listdir('datasets')
+    algorithms = ["MDS", "TSNE", 'UMAP', "RANDOM"]
+    metrics = ['RS', 'NS', 'SGS', 'NMS', 'SNS']
+
+    # Load DataFrame if CSV file exists, else initialize new DataFrame
+    if os.path.exists(f"{target_dir}/{target_csv_file}"):
+        df = pd.read_csv(f'{target_dir}/{target_csv_file}', index_col=[0, 1, 2])
+    else:
+        index = pd.MultiIndex.from_product(
+            [
+                [datasetStr.replace(".npy", "") for datasetStr in datasets],
+                [f'Run {i}' for i in range(n_runs)],
+                algorithms
+            ],
+            names=["Dataset", "Run", "Algorithm"]
+        )
+        df = pd.DataFrame(index=index, columns=metrics)
+        df.to_csv(f"{target_dir}/{target_csv_file}")
+    # Sort DataFrame index
+    df = df.sort_index()
+
+    with tqdm.tqdm(total=(len(datasets) * n_runs * len(algorithms))) as pbar:
+        for datasetStr in datasets:
+            datasetName = datasetStr.replace(".npy", "")
+            if "fashion_mnist" in datasetStr:
+                datasetName = "fashion_mnist"
+
+            X = np.load(f"datasets/{datasetName}.npy")
+
+            for n in range(n_runs):
+                
+                # Add current Dataset and run to progress bar
+                pbar.set_postfix_str(f"Dataset={datasetName}, Run={n}")
+
+                for alg in algorithms:
+                    # Skip if data has already been filled
+                    if df.loc[datasetName, f"Run {n}", alg].notna().all(axis=None):
+                        print(f"Entries for {datasetName}, Run {n}, {alg} have already been computed. Skipped.")
+                        pbar.update(1)
+                        continue
+                    
+                    # Load embedding
+                    try:
+                        Y = np.load(f"embeddings/{datasetName}_{alg}_{n}.npy")
+                    except FileNotFoundError:
+                        print(f"embeddings/{datasetName}_{alg}_{n}.npy does not exist.")
+                        print(f"Run {n} is skipped.")
+                        break
+                    
+                    # Log metric values
+                    M = Metrics(X, Y, setbatch=False)
+                    idx_value = (datasetName, f"Run {n}", alg)
+                    df.loc[idx_value, 'RS'] = M.compute_raw_stress()
+                    df.loc[idx_value, 'NS'] = M.compute_normalized_stress()
+                    df.loc[idx_value, 'SGS'] = M.compute_shepard_correlation()
+                    df.loc[idx_value, 'NMS'] = M.compute_kruskal_stress()
+                    df.loc[idx_value, 'SNS'] = M.compute_scale_normalized_stress()
+
+                    pbar.update(1)
+                df.to_csv(f"{target_dir}/{target_csv_file}")
+
+        df.to_csv(f"{target_dir}/{target_csv_file}")
+                  
+def log_min_stress(target_dir: str, target_csv_file: str, n_runs=10):
+    # Create target_dir if not exists
+    if not os.path.isdir(target_dir):
+        os.mkdir(target_dir)
+
+    datasets = os.listdir('datasets')
+    algorithms = ["RANDOM", "MDS", "UMAP", "TSNE"]
+
+    # Load DataFrame if CSV file exists, else initialize new DataFrame
+    if os.path.exists(f"{target_dir}/{target_csv_file}"):
+        min_stress = pd.read_csv(f'{target_dir}/{target_csv_file}', index_col=[0, 1, 2])
+    else:
+        index = pd.MultiIndex.from_product(
+            [
+                [datasetStr.replace(".npy", "") for datasetStr in datasets],
+                [f'Run {i}' for i in range(n_runs)],
+                ['x', 'y']
+            ],
+            names=["Dataset", "Run", "Coord"]
+        )
+
+        min_stress = pd.DataFrame(index=index, columns=algorithms)
+        min_stress.to_csv(f"{target_dir}/{target_csv_file}")
+    # Sort DataFrame index
+    min_stress = min_stress.sort_index()
+
+    with tqdm.tqdm(total=len(datasets) * n_runs * len(algorithms)) as pbar:
+        for datasetStr in datasets:
+            datasetName = datasetStr.replace(".npy", "")
+            X = np.load(f'datasets/{datasetName}.npy')
+            
+            for n in range(n_runs):
+                pbar.set_postfix_str(f"Dataset={datasetName} (shape={X.shape}), Run={n}")
+                # Skip if data has already been filled
+                if min_stress.loc[datasetName, f"Run {n}"].notna().all(axis=None):
+                    print(f"Entries for {datasetName}, Run {n} have already been computed. Skipped.")
+                    pbar.update(len(algorithms))
+                    continue
+                
+                for alg in algorithms:
+                    try:
+                        Y = np.load(f"embeddings/{datasetName}_{alg}_{n}.npy")
+                    except FileNotFoundError:
+                        print(f"embeddings/{datasetName}_{alg}_{n}.npy does not exist.")
+                        print(f"Run {n} is skipped.")
+                        break
+
+                    y, x = Metrics(X, Y, setbatch=False).compute_scale_normalized_stress(return_alpha=True)
+
+                    min_stress.loc[(datasetName, f"Run {n}", 'x'), alg] = x
+                    min_stress.loc[(datasetName, f"Run {n}", 'y'), alg] = y
+
+                    pbar.update(1)
+                min_stress.to_csv(f"{target_dir}/{target_csv_file}")
+        min_stress.to_csv(f"{target_dir}/{target_csv_file}")
+            
+
+
+
 def compute_stress_metrics(scale_by_ten=True):
     """
     Function to compute all metrics for each dataset in the 'datasets' directory.
@@ -101,7 +228,146 @@ def test_curve():
             #     json.dump(results,fdata,indent=4)
 
 
-def graph_kl(scales, target_dir, n_runs=10, drop_UMAP=False, plot_min_kl=True, min_kl_data_filepath=None, plot_normalized_kl=False, normalized_kl_data_filepath=None):
+def compute_kl_curve(scales, target_dir, datasets, start_run=0, n_runs=10, y_similarity='t', drop_UMAP=False):
+    """
+    Compute KL divergences at the given scale range for each embedding of each dataset and store in target_dir.
+
+    Parameters
+    ----------
+
+    scales : 1D array
+        The factors by which the embeddings are scaled before computing KL divergence
+
+    target_dir : string
+        The directory where the plotted graphs should be stored
+
+    n_runs : int
+        Number of sets of embeddings per dataset considered
+
+    y_similarity : 't' or 'normal'
+        Type of kernel used to calculate Q (either Student's t kernel or Gaussian kernel)
+
+    drop_UMAP : bool
+        If True, only graphs of t-SNE, MDS, and Random embeddings are plotted
+        If False, graphs of UMAP embeddings are also plotted
+    """
+
+    if not os.path.isdir(target_dir):
+        os.mkdir(target_dir)
+
+    stored_dir = f"{target_dir}/{round(scales[0])}_to_{round(scales[-1])}__{scales.shape[0]}"
+    if not os.path.isdir(stored_dir):
+        os.mkdir(stored_dir)
+
+    datasets = os.listdir('datasets')
+    # datasets = ['iris', 'wine', 'penguins', 'auto-mpg', 'orl', 'seismic', 'svhn', 'har', 'sms', 'fmd', 'cnae9', 'coil20', 'swissroll', 's-curve', 'secom', 'bank', 'sentiment', 'fashion_mnist', 'hiva', 'hatespeech', 'imdb', 'cifar10', 'spambase', 'epileptic', ]
+    # datasets = ['coil20', 'hatespeech']
+    # datasets = ['cifar10', 'spambase', 'epileptic']
+    if drop_UMAP:
+        algorithms = ['MDS', 'TSNE', 'RANDOM']
+    else:
+        algorithms = ['TSNE', 'UMAP', 'MDS', 'RANDOM']
+
+    # Save scales
+    np.save(f"{stored_dir}/scales.npy", scales)
+
+    with tqdm.tqdm(total=len(datasets) * len(algorithms) * n_runs) as pbar:
+
+        for datasetStr in datasets:
+            datasetName = datasetStr.replace(".npy", "")
+            if "fashion_mnist" in datasetStr:
+                datasetName = "fashion_mnist"
+            
+            X = np.load(f"datasets/{datasetName}.npy")
+            labels = np.load(f"dataset_labels/{datasetName}.npy")
+            
+            # # Larger scale for large datasets
+            # if datasetName in ['epileptic', 'spambase', 's-curve', 'swissroll']:
+            #     orig_scales = scales
+            #     scales = np.linspace(0, 250, 300)
+
+            for n in range(start_run, n_runs):
+                # Set Progress Bar to display current Dataset and Run
+                pbar.set_postfix_str(f"Dataset={datasetName} (shape={X.shape}), Run={n}")
+                
+                for alg in algorithms:
+                    Y = np.load(f"embeddings/{datasetName}_{alg}_{n}.npy")
+
+                    kl_divergences = _compute_kl_divergences_in_chunks(X, Y, scales, perplexity=30, y_similarity=y_similarity)
+                    np.save(f"{stored_dir}/{datasetName}_{alg}_{n}.npy", kl_divergences)
+
+                    pbar.update(1)
+
+
+            # # Reset scale to original
+            # if datasetName in ['epileptic', 'spambase', 's-curve', 'swissroll']:
+            #     scales = orig_scales
+
+    
+def generate_kl_graphs(data_dir: str, target_dir: str, plot_min=False, min_csv_filepath=None, y_axis_label='KL Divergence'):
+    if not os.path.isdir(target_dir):
+        os.mkdir(target_dir)
+
+    dataset_names = set()
+    for f in os.listdir(data_dir):
+        if f == "scales.npy": continue
+        splitter = '_MDS_0'
+        if splitter in f:
+            dataset_name = f.split(splitter)[0]
+            dataset_names.add(dataset_name)
+
+    scales = np.load(f"{data_dir}/scales.npy")
+    algorithms = ['MDS', 'TSNE', 'RANDOM']
+    alg_color = {
+        'TSNE' : 'darkblue',
+        'UMAP' : 'purple',
+        'MDS' : 'darkred',
+        'RANDOM' : 'darkgreen',
+    }
+
+    alg_name = {
+        'TSNE' : 't-SNE',
+        'UMAP' : 'UMAP',
+        'MDS' : 'MDS',
+        'RANDOM' : 'Random',
+    }
+    
+
+    if plot_min:
+        min_kls = pd.read_csv(min_csv_filepath, index_col=[0, 1, 2])
+    
+    for dataset in dataset_names:
+        fig, ax = plt.subplots(figsize=(15, 10))
+        run = 0
+        for alg in algorithms:
+            filename = f"{dataset}_{alg}_{run}.npy"
+            filepath = os.path.join(data_dir, filename)
+            color = alg_color[alg]
+
+            if os.path.exists(filepath):
+                data = np.load(filepath)
+                ax.plot(scales, data, c=color, label=alg_name[alg])
+                if plot_min:
+                    min_x = min_kls.loc[dataset, f'Run {run}', 'x'][alg]
+                    min_y = min_kls.loc[dataset, f'Run {run}', 'y'][alg]
+                    if min_x < scales[-1]:
+                        ax.scatter(min_x, min_y, marker='o', label=f'Minimum', c=color, s=50)
+            else:
+                print(f"File {filepath} not found. Data not plotted")
+        
+        ax.legend(fontsize=20)
+        ax.set_xlabel("Scale value", fontsize=20)
+        ax.set_ylabel(y_axis_label, fontsize=20)
+        ax.tick_params(axis='x', labelsize=20)
+        ax.tick_params(axis='y', labelsize=20)
+
+        fig.savefig(f"{target_dir}/{dataset}_{run}.pdf", format='pdf')
+        fig.savefig(f"{target_dir}/{dataset}_{run}.png", format='png')
+        plt.close(fig)
+
+
+
+def graph_kl(scales, target_dir, n_runs=10, y_similarity='t', drop_UMAP=False, plot_min_kl=True, min_kl_data_filepath=None, plot_normalized_kl=False, normalized_kl_data_filepath=None):
     """
     Plot KL Divergence vs. scale graphs for each group of embeddings in embeddings/
     If plotting minimum points (and points of KL Divergence where the embedding was normalized), log_min_kl (and log_normalized_kl) should be run first.
@@ -140,10 +406,12 @@ def graph_kl(scales, target_dir, n_runs=10, drop_UMAP=False, plot_min_kl=True, m
     if not os.path.isdir(target_dir):
         os.mkdir(target_dir)
 
+    datasets = os.listdir('datasets')
+
     if drop_UMAP:
-        algorithms = ['RANDOM', 'MDS', 'TSNE']
+        algorithms = ['MDS', 'TSNE', 'RANDOM']
     else:
-        algorithms = ["RANDOM", "MDS", "UMAP", "TSNE"]
+        algorithms = ['TSNE', 'UMAP', 'MDS', 'RANDOM']
 
     # Load minimum point data
     if plot_min_kl:

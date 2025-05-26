@@ -71,13 +71,6 @@ def save_embeddings(data, name, i, folder):
             np.save(f"{folder}/{name}_{i}.npy", data[0])
 
 
-def sample_down(X,num_samples):
-    """
-    Sample down datasets > 5000 to 5000 samples.
-    """
-    return X[np.random.choice(X.shape[0], num_samples)]
-
-
 if __name__ == "__main__":
     """
     Main function to compute and save embeddings for all datasets in the 'datasets' directory.
@@ -87,33 +80,31 @@ if __name__ == "__main__":
         os.mkdir('embeddings')
 
     datasets = os.listdir('datasets')
+    # datasets = ['epileptic.npy']
     
     num_iter = 10
-    size_limit = 5000
-    with tqdm.tqdm(total=len(datasets) * num_iter) as pbar:
+    num_algs = 4
+    with tqdm.tqdm(total=len(datasets) * num_iter * num_algs) as pbar:
 
         for datasetStr in datasets:
             X = np.load(f"datasets/{datasetStr}")
-            if X.shape[0] > size_limit:
-                X = sample_down(X,size_limit)
-                os.remove(f"datasets/{datasetStr}")
-                np.save(f"datasets/{datasetStr}", X)
-                print(f"I have sampled {datasetStr} down to {size_limit} elements.")
 
             DR = DimensionReducer(X,None)
             dname = datasetStr.replace(".npy", "")
 
             for i in range(num_iter):
-                mds = DR.compute_MDS()
-                np.save(f"embeddings/{dname}_MDS_{i}.npy",mds)
-
-                tsne = DR.compute_TSNE()
-                np.save(f"embeddings/{dname}_TSNE_{i}.npy",tsne)
+                random = DR.compute_random()
+                np.save(f"embeddings/{dname}_RANDOM_{i}.npy",random)                                    
+                pbar.update(1)
 
                 umap = DR.compute_UMAP()
                 np.save(f"embeddings/{dname}_UMAP_{i}.npy",umap)
+                pbar.update(1)
 
-                random = DR.compute_random()
-                np.save(f"embeddings/{dname}_RANDOM_{i}.npy",random)                                    
-        
+                tsne = DR.compute_TSNE()
+                np.save(f"embeddings/{dname}_TSNE_{i}.npy",tsne)
+                pbar.update(1)
+
+                mds = DR.compute_MDS()
+                np.save(f"embeddings/{dname}_MDS_{i}.npy",mds)
                 pbar.update(1)
