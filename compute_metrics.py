@@ -159,7 +159,7 @@ def graph_kl(
     if drop_UMAP:
         algorithms = ["RANDOM", "MDS", "TSNE"]
     else:
-        algorithms = ["RANDOM", "MDS", "UMAP", "TSNE"]
+        algorithms = ['TSNE', 'UMAP', 'MDS', 'RANDOM']
 
     # Load minimum point data
     if plot_min_kl:
@@ -803,8 +803,8 @@ def draw_shepard_diagrams(perplexity, target_dir, n_runs=10, granularity=10):
 
 
 if __name__ == "__main__":
-    # compute_stress_metrics()
-    # compute_stress_metrics(scale_by_ten=False)
+    compute_stress_metrics()
+    compute_stress_metrics(scale_by_ten=False)
     # test_curve()
 
     graph_dir = "graphs"
@@ -821,26 +821,26 @@ if __name__ == "__main__":
     normal_scales_kl_csv = "gaussian_kl_at_1_and_10.csv"
     normal_FSKL_csv = "gaussian_fskl.csv"
 
-    # log_kl_at_infty(
-    #     perplexity=30, target_dir=csv_dir, target_csv_file=kl_at_infty_csv, n_runs=10
-    # )
-    # log_zadu_kls(
-    #     perplexity=30, target_dir=csv_dir, target_csv_file=zadu_kl_csv, n_runs=10
-    # )
-    # log_normalized_kl(
-    #     perplexity=30,
-    #     target_dir=csv_dir,
-    #     target_csv_file=y_normalized_kls_csv,
-    #     n_runs=10,
-    # )
-    # log_min_kl(perplexity=30, target_dir=csv_dir, target_csv_file=min_kl_csv, n_runs=10)
-    # log_kl_at_scale(
-    #     perplexity=30,
-    #     target_dir=csv_dir,
-    #     target_csv_file=scales_kl_csv,
-    #     scales=scales_to_log,
-    #     n_runs=10,
-    # )
+    log_kl_at_infty(
+        perplexity=30, target_dir=csv_dir, target_csv_file=kl_at_infty_csv, n_runs=10
+    )
+    log_zadu_kls(
+        perplexity=30, target_dir=csv_dir, target_csv_file=zadu_kl_csv, n_runs=10
+    )
+    log_normalized_kl(
+        perplexity=30,
+        target_dir=csv_dir,
+        target_csv_file=y_normalized_kls_csv,
+        n_runs=10,
+    )
+    log_min_kl(perplexity=30, target_dir=csv_dir, target_csv_file=min_kl_csv, n_runs=10)
+    log_kl_at_scale(
+        perplexity=30,
+        target_dir=csv_dir,
+        target_csv_file=scales_kl_csv,
+        scales=scales_to_log,
+        n_runs=10,
+    )
 
     graph_kl(
         scales=np.linspace(0, 15, 350),
