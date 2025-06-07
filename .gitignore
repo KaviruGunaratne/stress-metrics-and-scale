@@ -9,3 +9,5 @@ embeddings/
 test-kl-figures/
 out.json
 test.ipynb
+csv_files/
+graphs/
